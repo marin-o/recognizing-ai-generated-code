@@ -1,10 +1,9 @@
 import torch
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from datasets import load_dataset
 
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from torch.utils.data import random_split
 
 
