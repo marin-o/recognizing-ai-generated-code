@@ -1,5 +1,5 @@
 import torch
-from pytorch_lightning import LightningDataModule
+import lightning as L
 from torch.utils.data import DataLoader
 from datasets import load_dataset
 
@@ -7,7 +7,7 @@ import pandas as pd
 from torch.utils.data import random_split
 
 
-class CoDETM4DataModule(LightningDataModule):
+class CoDETM4DataModule(L.LightningDataModule):
     def __init__(
         self,
         data_dir: str = "data/codet/",
