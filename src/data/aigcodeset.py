@@ -1,9 +1,9 @@
 from datasets import load_dataset
 from torch.utils.data import random_split
 import torch
-from dataset import AbstractDataset
 
-class AIGCodeSet(AbstractDataset):
+
+class AIGCodeSet:
     """
     AIGCodeSet dataset class for loading and processing the AIGCodeSet dataset.
     Inherits from the Dataset class.
@@ -69,9 +69,7 @@ class AIGCodeSet(AbstractDataset):
             # If split is True, split the dataset into train, validation, and test sets
             return self._split_dataset(ds)
         return ds
-
-
-
+    
 if __name__ == "__main__":
     # Example usage of the AIGCodeSet class, both with and without splitting
     dataset = AIGCodeSet(cache_dir='data/')
