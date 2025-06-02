@@ -1,82 +1,127 @@
-from datasets import load_dataset
-from torch.utils.data import random_split
-import torch
+import logging
+import os
+from typing import Tuple, Union
+from datasets import load_dataset, Dataset
+
+from datasets import ClassLabel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 class AIGCodeSet:
-    """
-    AIGCodeSet dataset class for loading and processing the AIGCodeSet dataset.
-    Inherits from the Dataset class.
-    """
-    def __init__(self, cache_dir='data/'):
+    """Dataset class for loading and processing the AIGCodeSet dataset."""
+
+    def __init__(self, cache_dir: str = "data/"):
         """
-        Initializes the AIGCodeSet dataset class.
-        
+        Initialize the AIGCodeSet dataset class.
+
         Args:
-            cache_dir: Directory to cache the dataset.
+            cache_dir (str): Directory to cache the dataset.
+
+        Raises:
+            ValueError: If cache_dir is invalid or does not exist.
         """
+        if not os.path.isdir(cache_dir):
+            raise ValueError(
+                f"Cache directory '{cache_dir}' does not exist or is not a directory"
+            )
         self.cache_dir = cache_dir
 
-    def _preprocess_dataset(self, dataset):
+    def _preprocess_dataset(self, dataset: Dataset) -> Dataset:
         """
-        Preprocesses the AIGCodeSet dataset by renaming columns and mapping target values.
-        
+        Preprocess the dataset by selecting columns, renaming, and mapping labels.
+
         Args:
-            dataset: The dataset to preprocess.
-        
+            dataset (Dataset): The raw dataset to preprocess.
+
         Returns:
-            The preprocessed dataset.
+            Dataset: The preprocessed dataset.
         """
-        dataset = dataset.select_columns(['code', 'LLM'])
-        dataset = dataset.rename_column('LLM', 'target')
-        dataset = dataset.map(lambda x: {'target': 'ai' if x['target'] != 'Human' else 'human'}, remove_columns=['target'])
-        label_map = {'human': 0, 'ai': 1}
-        dataset = dataset.map(lambda x: {'target': label_map[x['target']]})
+        dataset = dataset.select_columns(["code", "LLM"])
+        dataset = dataset.rename_column("LLM", "target")
+        dataset = dataset.map(
+            lambda x: {"target": "ai" if x["target"] != "Human" else "human"}
+        )
+        label_map = {"human": 0, "ai": 1}
+        dataset = dataset.map(lambda x: {"target": label_map[x["target"]]})
+        # Cast target to ClassLabel
+        dataset = dataset.cast_column("target", ClassLabel(names=["human", "ai"]))
         return dataset
-    
-    def _split_dataset(self, dataset):
+
+    def _split_dataset(
+        self, dataset: Dataset, test_size: float = 0.2, val_size: float = 0.1
+    ) -> Tuple[Dataset, Dataset, Dataset]:
         """
-        Splits the dataset into train, validation, and test sets.
-        
+        Split the dataset into train, validation, and test sets.
+
         Args:
-            dataset: The dataset to split.
-        
+            dataset (Dataset): The dataset to split.
+            test_size (float): Proportion of the dataset for the test set.
+            val_size (float): Proportion of the training set for the validation set.
+
         Returns:
-            A tuple containing the train, validation, and test datasets.
+            Tuple[Dataset, Dataset, Dataset]: Train, validation, and test datasets.
+
+        Raises:
+            ValueError: If split sizes are invalid.
         """
-        # Split the dataset into train, validation, and test sets
-        train_ds = dataset.train_test_split(test_size=0.2, seed=42)
-        train_val = train_ds['train'].train_test_split(test_size=0.1, seed=42)
-        
-        train = train_val['train']
-        val = train_val['test'] 
-        test = train_ds['test']
-        
+        if not (0 < test_size < 1 and 0 < val_size < 1):
+            raise ValueError("test_size and val_size must be between 0 and 1")
+        if test_size + val_size >= 1:
+            raise ValueError("test_size + val_size must be less than 1")
+
+        train_ds = dataset.train_test_split(
+            test_size=test_size, seed=42, stratify_by_column="target"
+        )
+        train_val = train_ds["train"].train_test_split(
+            test_size=val_size / (1 - test_size), seed=42, stratify_by_column="target"
+        )
+        train = train_val["train"]
+        val = train_val["test"]
+        test = train_ds["test"]
         return train, val, test
 
-    def get_dataset(self, split: bool=True):
+    def get_dataset(
+        self, split: bool = True, test_size: float = 0.2, val_size: float = 0.1
+    ) -> Union[Dataset, Tuple[Dataset, Dataset, Dataset]]:
         """
-        Loads the AIGCodeSet dataset, processes it, and returns the train, validation, and test splits.
-        """
-        # Load the dataset from the Hugging Face hub
-        ds = load_dataset("basakdemirok/AIGCodeSet", cache_dir=self.cache_dir, split='train')
-        
-        # Preprocess the dataset
-        ds = self._preprocess_dataset(ds)
+        Load and process the AIGCodeSet dataset.
 
+        Args:
+            split (bool): Whether to split the dataset into train, val, and test sets.
+            test_size (float): Proportion for the test set (if split=True).
+            val_size (float): Proportion for the validation set (if split=True).
+
+        Returns:
+            Union[Dataset, Tuple[Dataset, Dataset, Dataset]]: Full dataset or (train, val, test) splits.
+
+        Raises:
+            RuntimeError: If dataset loading fails.
+        """
+        try:
+            ds = load_dataset(
+                "basakdemirok/AIGCodeSet", cache_dir=self.cache_dir, split="train"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load dataset: {str(e)}")
+
+        ds = self._preprocess_dataset(ds)
         if split:
-            # If split is True, split the dataset into train, validation, and test sets
-            return self._split_dataset(ds)
+            return self._split_dataset(ds, test_size, val_size)
         return ds
-    
+
+
 if __name__ == "__main__":
-    # Example usage of the AIGCodeSet class, both with and without splitting
-    dataset = AIGCodeSet(cache_dir='data/')
+    dataset = AIGCodeSet(cache_dir="data/")
     train, val, test = dataset.get_dataset(split=True)
-    print(f"Train dataset size: {len(train)}")
-    print(f"Validation dataset size: {len(val)}")
-    print(f"Test dataset size: {len(test)}")
-    print(f'Sample from train dataset: {train[0]}')
+    logger.info(f"Train dataset size: {len(train)}")
+    logger.info(f"Validation dataset size: {len(val)}")
+    logger.info(f"Test dataset size: {len(test)}")
+    logger.info(f"Sample from train dataset: {train[0]}")
     full_dataset = dataset.get_dataset(split=False)
-    print(f"Full dataset size: {len(full_dataset)}")
-    print(f"Sample from full dataset: {full_dataset[0]}")
+    logger.info(f"Full dataset size: {len(full_dataset)}")
+    logger.info(f"Sample from full dataset: {full_dataset[0]}")
