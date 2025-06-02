@@ -15,7 +15,6 @@ class AIGCodeSet:
         Args:
             cache_dir: Directory to cache the dataset.
         """
-        super().__init__()
         self.cache_dir = cache_dir
 
     def _preprocess_dataset(self, dataset):
