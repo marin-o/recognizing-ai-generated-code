@@ -48,7 +48,6 @@ class AIGCodeSet:
         )
         label_map = {"human": 0, "ai": 1}
         dataset = dataset.map(lambda x: {"target": label_map[x["target"]]})
-        # Cast target to ClassLabel
         dataset = dataset.cast_column("target", ClassLabel(names=["human", "ai"]))
         return dataset
 
