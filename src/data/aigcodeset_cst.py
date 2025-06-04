@@ -41,7 +41,7 @@ def traverse(node: Node, depth: int) -> int:
     return max_nesting_depth
 
 
-def extract_features_for_example(example: Dict) -> Dict:
+def extract_features_for_example(example: Dict, as_tensor: bool) -> Dict:
     """
     Extract CST features for a single example.
 
@@ -91,7 +91,8 @@ def extract_features_for_example(example: Dict) -> Dict:
         "binary_ops": len(binary_op_query.captures(root_node)),
         "errors": len(error_query.captures(root_node)),
     }
-    features = {"features": list(features.values())}
+    if as_tensor:
+        features = {"features": list(features.values())}
     example.update(features)
     return example
 
@@ -99,7 +100,7 @@ def extract_features_for_example(example: Dict) -> Dict:
 class AIGCodeSet_WithCSTFeatures:
     """Dataset class for loading and processing the AIGCodeSet dataset."""
 
-    def __init__(self, cache_dir: str = "data/"):
+    def __init__(self, cache_dir: str = "data/", features_as_tensor: bool=True):
         """
         Initialize the AIGCodeSet dataset class.
 
@@ -114,6 +115,7 @@ class AIGCodeSet_WithCSTFeatures:
                 f"Cache directory '{cache_dir}' does not exist or is not a directory"
             )
         self.cache_dir = cache_dir
+        self.features_as_tensor = features_as_tensor
 
     def _extract_cst_features(self, data: Dataset) -> Dataset:
         """
@@ -126,7 +128,7 @@ class AIGCodeSet_WithCSTFeatures:
             Dataset: The dataset with added CST features.
         """
         return data.map(
-            extract_features_for_example,
+            lambda x: extract_features_for_example(x, as_tensor=self.features_as_tensor),
             num_proc=4,  # Parallelize across 4 processes
         )
 
