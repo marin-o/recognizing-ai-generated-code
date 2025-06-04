@@ -10,6 +10,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def traverse(node: Node, depth: int) -> int:
     """
     Traverse the CST and compute the maximum nesting depth.
@@ -24,7 +25,13 @@ def traverse(node: Node, depth: int) -> int:
     max_nesting_depth = depth
 
     node_type = node.type
-    if node_type in {"function_definition", "class_definition", "if_statement", "for_statement", "while_statement"}:
+    if node_type in {
+        "function_definition",
+        "class_definition",
+        "if_statement",
+        "for_statement",
+        "while_statement",
+    }:
         for child in node.children:
             max_nesting_depth = max(max_nesting_depth, traverse(child, depth + 1))
     else:
@@ -32,6 +39,7 @@ def traverse(node: Node, depth: int) -> int:
             max_nesting_depth = max(max_nesting_depth, traverse(child, depth))
 
     return max_nesting_depth
+
 
 def extract_features_for_example(example: Dict) -> Dict:
     """
@@ -48,44 +56,45 @@ def extract_features_for_example(example: Dict) -> Dict:
     parser = Parser(PY_LANGUAGE)
 
     try:
-        tree = parser.parse(bytes(example['code'], "utf8"))
+        tree = parser.parse(bytes(example["code"], "utf8"))
     except Exception as e:
         logger.warning(f"Failed to parse code: {str(e)}")
         return example  # Return unchanged example on parse failure
 
     root_node = tree.root_node
-    
-    # Combined Tree-Sitter query for all features
-    query = PY_LANGUAGE.query("""
-    (function_definition) @func
-    (if_statement) @if_stmt
-    (while_statement) @while_stmt
-    (for_statement) @for_stmt
-    (comment) @comment
-    (import_statement) @import
-    (import_from_statement) @import_from
-    (class_definition) @class_def
-    (binary_operator) @binop
-    (ERROR) @error
-    """)
-    captures = query.captures(root_node)
+    lang = PY_LANGUAGE
+
+    # Individual Tree-Sitter queries for each feature
+    function_query = lang.query("(function_definition) @func")
+    if_query = lang.query("(if_statement) @if_stmt")
+    while_query = lang.query("(while_statement) @while_stmt")
+    for_query = lang.query("(for_statement) @for_stmt")
+    comment_query = lang.query("(comment) @comment")
+    import_query = lang.query("(import_statement) @import")
+    import_from_query = lang.query("(import_from_statement) @import_from")
+    class_query = lang.query("(class_definition) @class_def")
+    binary_op_query = lang.query("(binary_operator) @binop")
+    error_query = lang.query("(ERROR) @error")
 
     max_nesting_depth = traverse(root_node, 0)
 
     features = {
-        "function_defs": sum(1 for capture in captures if capture[1] == "func"),
-        "if_statements": sum(1 for capture in captures if capture[1] == "if_stmt"),
-        "loops": sum(1 for capture in captures if capture[1] in ["for_stmt", "while_stmt"]),
-        "imports": sum(1 for capture in captures if capture[1] in ["import", "import_from"]),
-        "comments": sum(1 for capture in captures if capture[1] == "comment"),
-        "class_defs": sum(1 for capture in captures if capture[1] == "class_def"),
+        "function_defs": len(function_query.captures(root_node)),
+        "if_statements": len(if_query.captures(root_node)),
+        "loops": len(for_query.captures(root_node))
+        + len(while_query.captures(root_node)),
+        "imports": len(import_query.captures(root_node))
+        + len(import_from_query.captures(root_node)),
+        "comments": len(comment_query.captures(root_node)),
+        "class_defs": len(class_query.captures(root_node)),
         "max_nesting_depth": max_nesting_depth,
-        "binary_ops": sum(1 for capture in captures if capture[1] == "binop"),
-        "errors": sum(1 for capture in captures if capture[1] == "error"),
+        "binary_ops": len(binary_op_query.captures(root_node)),
+        "errors": len(error_query.captures(root_node)),
     }
-    
+    features = {"features": list(features.values())}
     example.update(features)
     return example
+
 
 class AIGCodeSet_WithCSTFeatures:
     """Dataset class for loading and processing the AIGCodeSet dataset."""
@@ -142,14 +151,13 @@ class AIGCodeSet_WithCSTFeatures:
         dataset = dataset.map(lambda x: {"target": label_map[x["target"]]})
         dataset = dataset.cast_column("target", ClassLabel(names=["human", "ai"]))
         dataset = self._extract_cst_features(dataset)
-        
+
         # Reorder columns to place 'target' last
         feature_columns = [
             col for col in dataset.column_names if col not in ["code", "target"]
         ]
         final_columns = ["code"] + feature_columns + ["target"]
         dataset = dataset.select_columns(final_columns)
-        
         return dataset
 
     def _split_dataset(
@@ -214,13 +222,15 @@ class AIGCodeSet_WithCSTFeatures:
             return self._split_dataset(ds, test_size, val_size)
         return ds
 
+
 if __name__ == "__main__":
     dataset = AIGCodeSet_WithCSTFeatures(cache_dir="data/")
     train, val, test = dataset.get_dataset(split=True)
     logger.info(f"Train dataset size: {len(train)}")
     logger.info(f"Validation dataset size: {len(val)}")
     logger.info(f"Test dataset size: {len(test)}")
-    logger.info(f"Sample from train dataset: {train[0]}")
+    print(f"Train dataset: {train}")
+    logger.info(f"Sample from train dataset: {train[1000]}")
     full_dataset = dataset.get_dataset(split=False)
     logger.info(f"Full dataset size: {len(full_dataset)}")
     logger.info(f"Sample from full dataset: {full_dataset[0]}")

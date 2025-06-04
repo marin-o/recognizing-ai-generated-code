@@ -6,21 +6,21 @@ def tokenize_fn(
     tokenizer: PreTrainedTokenizer, examples: Dict[str, Any], max_length: int = 512
 ) -> Dict[str, Any]:
     """
-    Tokenizes code examples using the provided tokenizer.
+    Tokenizes code examples using the provided tokenizer while preserving all columns.
 
     Args:
         tokenizer (PreTrainedTokenizer): The tokenizer to process the code.
-        examples (Dict[str, Any]): Dictionary containing 'code' and 'target' keys.
+        examples (Dict[str, Any]): Dictionary containing 'code' and other columns.
         max_length (int): Maximum sequence length for tokenization. Defaults to 512.
 
     Returns:
-        Dict[str, Any]: Tokenized inputs with 'input_ids', 'attention_mask', and 'target'.
+        Dict[str, Any]: Tokenized inputs with all original columns preserved, target at end.
 
     Raises:
-        ValueError: If 'code' or 'target' keys are missing in examples.
+        ValueError: If 'code' key is missing in examples.
     """
-    if "code" not in examples or "target" not in examples:
-        raise ValueError("Examples must contain 'code' and 'target' keys")
+    if "code" not in examples:
+        raise ValueError("Examples must contain 'code' key")
 
     tokenized = tokenizer(
         examples["code"],
@@ -29,5 +29,13 @@ def tokenize_fn(
         max_length=max_length,
         return_tensors=None,
     )
-    tokenized["target"] = examples["target"]
-    return tokenized
+
+    # Create result without target first
+    examples_without_target = {k: v for k, v in examples.items() if k != "target"}
+    result = {**examples_without_target, **tokenized}
+
+    # Add target at the end if it exists
+    if "target" in examples:
+        result["target"] = examples["target"]
+
+    return result
