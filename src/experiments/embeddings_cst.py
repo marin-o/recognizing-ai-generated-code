@@ -5,16 +5,19 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import mlflow.pytorch
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
+from torchmetrics import Accuracy, F1Score, Recall, Precision
 from transformers import RobertaTokenizer
 from tqdm import tqdm
 from data.aigcodeset_cst import AIGCodeSet_WithCSTFeatures
 from models.multimodal_classifier import SimpleMultimodalClassifier
 from utils.utils import tokenize_fn
 from sklearn.preprocessing import StandardScaler
+import mlflow
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +81,11 @@ def parse_args():
         type=int,
         default=512,
         help="Maximum sequence length for tokenization",
+    )
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="Only evaluate the model without training",
     )
     return parser.parse_args()
 
@@ -153,12 +161,23 @@ def evaluate_model(
         device (torch.device): Device to run the model on.
 
     Returns:
-        dict: Dictionary containing accuracy and loss.
+        dict: Dictionary containing accuracy, f1, recall, precision, and loss.
     """
     model.eval()
-    correct = 0
-    total = 0
+
+    num_classes = 2
+    accuracy = Accuracy(task="multiclass", num_classes=num_classes).to(device)
+    f1 = F1Score(task="multiclass", num_classes=num_classes, average="macro").to(device)
+    recall = Recall(task="multiclass", num_classes=num_classes, average="macro").to(
+        device
+    )
+    precision = Precision(
+        task="multiclass", num_classes=num_classes, average="macro"
+    ).to(device)
+
     running_loss = 0.0
+    all_predictions = []
+    all_labels = []
 
     with torch.no_grad():
         for data in dataloader:
@@ -170,12 +189,46 @@ def evaluate_model(
             loss = criterion(outputs, labels)
             running_loss += loss.item()
             _, predicted = torch.max(outputs, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
 
-    accuracy = correct / total if total > 0 else 0
+            all_predictions.append(predicted)
+            all_labels.append(labels)
+
+    all_predictions = torch.cat(all_predictions)
+    all_labels = torch.cat(all_labels)
+
+    acc = accuracy(all_predictions, all_labels)
+    f1_score = f1(all_predictions, all_labels)
+    recall_score = recall(all_predictions, all_labels)
+    precision_score = precision(all_predictions, all_labels)
     avg_loss = running_loss / len(dataloader) if len(dataloader) > 0 else 0
-    return {"accuracy": accuracy, "loss": avg_loss}
+
+    test_metrics = {
+        "accuracy": acc.item(),
+        "f1": f1_score.item(),
+        "recall": recall_score.item(),
+        "precision": precision_score.item(),
+        "loss": avg_loss,
+    }
+
+    mlflow.set_experiment("AIGCodeSet")
+    mlflow_run_name = "embeddings_cst"
+    experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
+    runs = mlflow.search_runs(
+        experiment_ids=[experiment_id],
+        filter_string=f"tags.mlflow.runName = '{mlflow_run_name}'",
+        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
+    )
+    run_id = runs["run_id"].iloc[0] if not runs.empty else None
+    with mlflow.start_run(run_id=run_id, run_name="embeddings_cst") as run:
+        mlflow.log_metric("test_accuracy", test_metrics["accuracy"])
+        mlflow.log_metric("test_f1_macro", test_metrics["f1"])
+        mlflow.log_metric("recall", test_metrics["recall"])
+        mlflow.log_metric("precision", test_metrics["precision"])
+        mlflow.log_metric("test_loss", test_metrics["loss"])
+
+        mlflow.pytorch.log_model(model, "model")
+
+    return test_metrics
 
 
 def train_model(
@@ -224,6 +277,9 @@ def train_model(
         val_metrics = evaluate_model(val_dataloader, model, criterion, device)
         logger.info(f"Validation loss: {val_metrics['loss']:.4f}")
         logger.info(f"Validation accuracy: {val_metrics['accuracy']:.4f}")
+        logger.info(f"Validation F1: {val_metrics['f1']:.4f}")
+        logger.info(f"Validation recall: {val_metrics['recall']:.4f}")
+        logger.info(f"Validation precision: {val_metrics['precision']:.4f}")
 
         scheduler.step()
 
@@ -260,7 +316,6 @@ def main():
     train = train.map(tokenize, batched=True)
     val = val.map(tokenize, batched=True)
     test = test.map(tokenize, batched=True)
-    print(train)
 
     scaler = StandardScaler()
     # Scale CST features (stored in "features" column as lists)
@@ -313,23 +368,40 @@ def main():
         test, batch_size=args.batch_size, num_workers=6, pin_memory=True
     )
 
-    # Train model
-    model = train_model(
-        args.epochs,
-        train_dataloader,
-        val_dataloader,
-        model,
-        optimizer,
-        criterion,
-        scheduler,
-        device,
-        args.patience,
-        args.log_interval,
-    )
+    models_dir = "models/simple_multimodal"
+    best_model_path = os.path.join(models_dir, "best_model.pth")
+
+    if args.eval:
+        if not os.path.exists(best_model_path):
+            logger.error(
+                f"Model file not found at {best_model_path}. Train the model first."
+            )
+            sys.exit(1)
+
+        logger.info("Loading pre-trained model for evaluation...")
+        model.load_state_dict(torch.load(best_model_path, map_location=device))
+        logger.info("Model loaded successfully.")
+    else:
+        # Training mode
+        model = train_model(
+            args.epochs,
+            train_dataloader,
+            val_dataloader,
+            model,
+            optimizer,
+            criterion,
+            scheduler,
+            device,
+            args.patience,
+            args.log_interval,
+        )
 
     # Evaluate model
     test_metrics = evaluate_model(test_dataloader, model, criterion, device)
     logger.info(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
+    logger.info(f"Test F1: {test_metrics['f1']:.4f}")
+    logger.info(f"Test Recall: {test_metrics['recall']:.4f}")
+    logger.info(f"Test Precision: {test_metrics['precision']:.4f}")
     logger.info(f"Test Loss: {test_metrics['loss']:.4f}")
 
 
