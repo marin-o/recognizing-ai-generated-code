@@ -100,7 +100,7 @@ def extract_features_for_example(example: Dict, as_tensor: bool) -> Dict:
 class AIGCodeSet_WithCSTFeatures:
     """Dataset class for loading and processing the AIGCodeSet dataset."""
 
-    def __init__(self, cache_dir: str = "data/", features_as_tensor: bool=True):
+    def __init__(self, cache_dir: str = "data/", features_as_tensor: bool = True):
         """
         Initialize the AIGCodeSet dataset class.
 
@@ -128,7 +128,9 @@ class AIGCodeSet_WithCSTFeatures:
             Dataset: The dataset with added CST features.
         """
         return data.map(
-            lambda x: extract_features_for_example(x, as_tensor=self.features_as_tensor),
+            lambda x: extract_features_for_example(
+                x, as_tensor=self.features_as_tensor
+            ),
             num_proc=4,  # Parallelize across 4 processes
         )
 
