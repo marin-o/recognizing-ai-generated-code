@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import warnings
 from transformers import RobertaModel
 
 
@@ -17,25 +18,36 @@ class SimpleMultimodalClassifier(nn.Module):
 
     def __init__(
         self,
+        reduce: bool,
+        dim: int = None,
         dropout_rate: float = 0.2,
-        reduced_dim: int = 64,
         num_numerical_features: int = 9,
         num_classes: int = 2,
         freeze_codebert: bool = True,
     ):
         super(SimpleMultimodalClassifier, self).__init__()
-
+        
+        if reduce and dim is None:
+            raise ValueError("dim must be specified when reduce=True")
+        
+        if not reduce and dim is not None:
+            warnings.warn(
+                f"dim ({dim}) will be ignored because reduce=False",
+                UserWarning
+            )
+        self.reduce = reduce
         self.codebert = RobertaModel.from_pretrained("microsoft/codebert-base")
-
-        if reduced_dim >= self.codebert.config.hidden_size // 4:
+        
+        if dim is not None and dim >= self.codebert.config.hidden_size // 4:
             raise ValueError(
-                f"reduced_dim ({reduced_dim}) must be smaller than "
+                f"dim ({dim}) must be smaller than "
                 f"{self.codebert.config.hidden_size // 4} "
                 f"(hidden_size // 4 = {self.codebert.config.hidden_size} // 4). "
                 f"Consider using a smaller value like 64 or 128."
             )
 
-        self.reduced_dim = reduced_dim
+
+        self.dim = dim
         self.num_classes = num_classes
         self.num_features = num_numerical_features
 
@@ -44,23 +56,24 @@ class SimpleMultimodalClassifier(nn.Module):
                 param.requires_grad = False
         self.dropout = nn.Dropout(dropout_rate)
 
-        # Dimensionality reduction MLP
-        self.reduce_dims_mlp = nn.Sequential(
-            nn.Linear(
-                self.codebert.config.hidden_size, self.codebert.config.hidden_size // 2
-            ),
-            nn.ReLU(),
-            nn.Linear(
-                self.codebert.config.hidden_size // 2,
-                self.codebert.config.hidden_size // 4,
-            ),
-            nn.ReLU(),
-            nn.Linear(self.codebert.config.hidden_size // 4, self.reduced_dim),
-        )
+        if reduce:
+            self.reduce_dims_mlp = nn.Sequential(
+                nn.Linear(
+                    self.codebert.config.hidden_size, self.codebert.config.hidden_size // 2
+                ),
+                nn.ReLU(),
+                nn.Linear(
+                    self.codebert.config.hidden_size // 2,
+                    self.codebert.config.hidden_size // 4,
+                ),
+                nn.ReLU(),
+                nn.Linear(self.codebert.config.hidden_size // 4, self.dim),
+            )
+        else:
+            self.dim = self.codebert.config.hidden_size
 
-        # Classifier layer
         self.classifier = nn.Linear(
-            self.reduced_dim + self.num_features, self.num_classes
+            self.dim + self.num_features, self.num_classes
         )
 
     def forward(
@@ -93,16 +106,16 @@ class SimpleMultimodalClassifier(nn.Module):
         outputs = self.codebert(input_ids=input_ids, attention_mask=attention_mask)
         emb = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token embedding
         emb = self.dropout(emb)
-        # Apply dimensionality reduction MLP
-        emb = self.reduce_dims_mlp(emb)
+        if self.reduce:
+            emb = self.reduce_dims_mlp(emb)
         # Concatenate numerical features
         if features is None:
             raise ValueError("features must be provided")
         concatenated = torch.cat((emb, features), dim=1)
-        if concatenated.shape[1] != self.reduced_dim + self.num_features:
+        if concatenated.shape[1] != self.dim + self.num_features:
             raise ValueError(
                 f"Concatenated features shape {concatenated.shape[1]} does not match "
-                f"expected shape {self.reduced_dim + self.num_features}"
+                f"expected shape {self.dim + self.num_features}"
             )
         # Pass through classifier layer
         logits = self.classifier(concatenated)

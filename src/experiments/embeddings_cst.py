@@ -211,7 +211,7 @@ def evaluate_model(
     }
 
     mlflow.set_experiment("AIGCodeSet")
-    mlflow_run_name = "embeddings_cst"
+    mlflow_run_name = "embeddings_cst_no_reduce"
     experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
     runs = mlflow.search_runs(
         experiment_ids=[experiment_id],
@@ -219,7 +219,7 @@ def evaluate_model(
         run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
     )
     run_id = runs["run_id"].iloc[0] if not runs.empty else None
-    with mlflow.start_run(run_id=run_id, run_name="embeddings_cst") as run:
+    with mlflow.start_run(run_id=run_id, run_name=mlflow_run_name) as run:
         mlflow.log_metric("test_accuracy", test_metrics["accuracy"])
         mlflow.log_metric("test_f1_macro", test_metrics["f1"])
         mlflow.log_metric("recall", test_metrics["recall"])
@@ -352,7 +352,7 @@ def main():
     )
 
     # Initialize model, optimizer, and criterion
-    model = SimpleMultimodalClassifier().to(device)
+    model = SimpleMultimodalClassifier(reduce=False, dim=64).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
@@ -368,7 +368,7 @@ def main():
         test, batch_size=args.batch_size, num_workers=6, pin_memory=True
     )
 
-    models_dir = "models/simple_multimodal"
+    models_dir = "models/simple_multimodal_noreduce"
     best_model_path = os.path.join(models_dir, "best_model.pth")
 
     if args.eval:
