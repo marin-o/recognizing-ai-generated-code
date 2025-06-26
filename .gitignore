@@ -1,8 +1,9 @@
 # Data folder
 /data/
+# Exception: unignore specific file
+!/data/aigcodeset_pertrubations_levenshtein.json
 /models/
 /mlruns/
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
