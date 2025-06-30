@@ -51,7 +51,7 @@ class SimpleLinearHeadClassifier(nn.Module):
                 "input_ids and attention_mask must have the same batch size"
             )
         outputs = self.codebert(input_ids=input_ids, attention_mask=attention_mask)
-        emb = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token embedding
+        emb = outputs.last_hidden_state[:, 0, :]  
         dropped = self.dropout(emb)
         logits = self.classifier(dropped)
         return logits

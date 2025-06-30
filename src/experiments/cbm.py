@@ -2,22 +2,17 @@ import argparse
 import logging
 import sys
 import os
+import json
+from datetime import datetime
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-import mlflow.pytorch
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from torchmetrics import Accuracy, F1Score, Recall, Precision
-from transformers import RobertaTokenizer, RobertaModel
 from tqdm import tqdm
-from data.aigcodeset import AIGCodeSet
-from models.cbmclassifier import CBMClassifier
-from utils.utils import tokenize_fn
-import mlflow
-
-# Configure logging
+import optuna
+from optuna.samplers import TPESampler
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -82,6 +77,23 @@ def parse_args():
     parser.add_argument(
         "--gradient-clip", type=float, default=1.0, help="Gradient clipping value"
     )
+    parser.add_argument(
+        "--hyperparameter-search",
+        action="store_true",
+        help="Perform hyperparameter search using Optuna",
+    )
+    parser.add_argument(
+        "--n-trials",
+        type=int,
+        default=50,
+        help="Number of trials for hyperparameter search",
+    )
+    parser.add_argument(
+        "--search-epochs",
+        type=int,
+        default=15,
+        help="Number of epochs per trial during hyperparameter search",
+    )
     return parser.parse_args()
 
 
@@ -110,14 +122,14 @@ def train_one_epoch(
         loss = criterion(outputs, labels)
         loss.backward()
         
-        # Add gradient clipping
+
         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
         
         optimizer.step()
 
         running_loss += loss.item()
         
-        # Update overall progress bar
+
         if overall_progress is not None:
             overall_progress.update(1)
             overall_progress.set_postfix({
@@ -142,6 +154,7 @@ def evaluate_model(
     model: torch.nn.Module,
     criterion: torch.nn.Module,
     device: torch.device,
+    log_to_mlflow: bool = False,
 ) -> dict:
     model.eval()
 
@@ -190,22 +203,23 @@ def evaluate_model(
         "loss": avg_loss,
     }
 
-    mlflow.set_experiment("AIGCodeSet")
-    mlflow_run_name = "cbm"
-    experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
-    runs = mlflow.search_runs(
-        experiment_ids=[experiment_id],
-        filter_string=f"tags.mlflow.runName = '{mlflow_run_name}'",
-        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
-    )
-    run_id = runs["run_id"].iloc[0] if not runs.empty else None
-    with mlflow.start_run(run_id=run_id, run_name=mlflow_run_name) as run:
-        mlflow.log_metric("test_accuracy", test_metrics["accuracy"])
-        mlflow.log_metric("test_f1_macro", test_metrics["f1"])
-        mlflow.log_metric("recall", test_metrics["recall"])
-        mlflow.log_metric("precision", test_metrics["precision"])
-        mlflow.log_metric("test_loss", test_metrics["loss"])
-
+    if log_to_mlflow:
+        import mlflow
+        mlflow.set_experiment("AIGCodeSet")
+        mlflow_run_name = "cbm"
+        experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment_id],
+            filter_string=f"tags.mlflow.runName = '{mlflow_run_name}'",
+            run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
+        )
+        run_id = runs["run_id"].iloc[0] if not runs.empty else None
+        with mlflow.start_run(run_id=run_id, run_name=mlflow_run_name) as run:
+            mlflow.log_metric("test_accuracy", test_metrics["accuracy"])
+            mlflow.log_metric("test_f1_macro", test_metrics["f1"])
+            mlflow.log_metric("recall", test_metrics["recall"])
+            mlflow.log_metric("precision", test_metrics["precision"])
+            mlflow.log_metric("test_loss", test_metrics["loss"])
 
     return test_metrics
 
@@ -229,7 +243,6 @@ def train_model(
     os.makedirs(models_dir, exist_ok=True)
     best_model_path = os.path.join(models_dir, "best_model.pth")
 
-    # Calculate total training steps for overall progress bar
     total_steps = epochs * len(train_dataloader)
     overall_progress = tqdm(total=total_steps, desc="Training Progress", position=0)
 
@@ -240,7 +253,7 @@ def train_model(
         )
         logger.info(f"Average training loss: {avg_loss:.4f}")
 
-        val_metrics = evaluate_model(val_dataloader, model, criterion, device)
+        val_metrics = evaluate_model(val_dataloader, model, criterion, device, log_to_mlflow=False)
         logger.info(f"Validation loss: {val_metrics['loss']:.4f}")
         logger.info(f"Validation accuracy: {val_metrics['accuracy']:.4f}")
         logger.info(f"Validation F1: {val_metrics['f1']:.4f}")
@@ -267,17 +280,239 @@ def train_model(
     return model
 
 
+def save_best_hyperparameters(params: dict, score: float):
+    """Save the best hyperparameters to a JSON file."""
+    hyperparams_dir = "models/cbm/hyperparameters"
+    os.makedirs(hyperparams_dir, exist_ok=True)
+    
+    hyperparams_record = {
+        "timestamp": datetime.now().isoformat(),
+        "validation_f1_score": score,
+        "parameters": params
+    }
+    
+    best_params_file = os.path.join(hyperparams_dir, "best_hyperparameters.json")
+    with open(best_params_file, "w") as f:
+        json.dump(hyperparams_record, f, indent=2)
+    
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    history_file = os.path.join(hyperparams_dir, f"hyperparams_{timestamp_str}_f1_{score:.4f}.json")
+    with open(history_file, "w") as f:
+        json.dump(hyperparams_record, f, indent=2)
+    
+    logger.info(f"Saved best hyperparameters with F1 score: {score:.4f}")
+
+
+def load_best_hyperparameters():
+    """Load the best hyperparameters if they exist."""
+    best_params_file = "models/cbm/hyperparameters/best_hyperparameters.json"
+    if os.path.exists(best_params_file):
+        with open(best_params_file, "r") as f:
+            record = json.load(f)
+            return record["parameters"], record["validation_f1_score"]
+    return None, None
+
+
+def objective(trial, dataset, tokenizer, device, search_epochs):
+    """Optuna objective function for hyperparameter optimization."""
+    from transformers import RobertaModel
+    from models.cbmclassifier import CBMClassifier
+    from utils.utils import tokenize_fn
+    
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
+    batch_size = trial.suggest_categorical("batch_size", [8, 16, 32])
+    weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-1, log=True)
+    dropout_rate = trial.suggest_float("dropout_rate", 0.1, 0.7)
+    lstm_hidden_dim = trial.suggest_categorical("lstm_hidden_dim", [128, 256, 512])
+    filter_sizes = trial.suggest_categorical("filter_sizes", [256, 512, 768, 1024])
+    gradient_clip = trial.suggest_float("gradient_clip", 0.5, 2.0)
+    scheduler_type = trial.suggest_categorical("scheduler", ["cosine", "step"])
+    
+    train, val, test = dataset.get_dataset(split=True, test_size=0.2, val_size=0.1)
+    
+    tokenize = lambda x: tokenize_fn(tokenizer, x, max_length=512)
+    train = train.map(tokenize, batched=True)
+    val = val.map(tokenize, batched=True)
+    
+    train.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
+    val.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
+    
+    base_model = RobertaModel.from_pretrained('microsoft/codebert-base')
+    model = CBMClassifier(
+        base_model=base_model,
+        lstm_hidden_dim=lstm_hidden_dim,
+        filter_sizes=filter_sizes,
+        dropout_rate=dropout_rate
+    ).to(device)
+    
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=learning_rate,
+        weight_decay=weight_decay,
+        eps=1e-8
+    )
+    
+    if scheduler_type == "cosine":
+        scheduler = CosineAnnealingLR(optimizer, T_max=search_epochs, eta_min=1e-7)
+    else:
+        scheduler = StepLR(optimizer, step_size=search_epochs//3, gamma=0.1)
+    
+    criterion = torch.nn.CrossEntropyLoss()
+    
+    train_dataloader = DataLoader(
+        train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+    )
+    val_dataloader = DataLoader(
+        val, batch_size=batch_size, num_workers=4, pin_memory=True
+    )
+    
+    best_val_f1 = 0.0
+    patience = 5
+    patience_counter = 0
+    
+    epoch_progress = tqdm(range(search_epochs), desc=f"Trial {trial.number}", position=1, leave=False)
+    
+    for epoch in epoch_progress:
+
+        model.train()
+        total_loss = 0.0
+        
+        for data in train_dataloader:
+            input_ids = data["input_ids"].to(device)
+            attention_mask = data["attention_mask"].to(device)
+            labels = data["target"].to(device)
+            inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+            
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+            optimizer.step()
+            total_loss += loss.item()
+        
+
+        val_metrics = evaluate_model(val_dataloader, model, criterion, device, log_to_mlflow=False)
+        scheduler.step()
+        
+        current_f1 = val_metrics['f1']
+        if current_f1 > best_val_f1:
+            best_val_f1 = current_f1
+            patience_counter = 0
+        else:
+            patience_counter += 1
+        
+
+        epoch_progress.set_postfix({
+            "val_f1": f"{current_f1:.4f}",
+            "best_f1": f"{best_val_f1:.4f}",
+            "patience": f"{patience_counter}/{patience}"
+        })
+            
+
+        if patience_counter >= patience:
+            epoch_progress.set_description(f"Trial {trial.number} (Early Stop)")
+            break
+        
+
+        trial.report(current_f1, epoch)
+        
+
+        if trial.should_prune():
+            epoch_progress.set_description(f"Trial {trial.number} (Pruned)")
+            epoch_progress.close()
+            raise optuna.exceptions.TrialPruned()
+    
+    epoch_progress.close()
+    return best_val_f1
+
+
+def hyperparameter_search(args, dataset, tokenizer, device):
+    """Perform hyperparameter search using Optuna."""
+    logger.info("Starting hyperparameter search...")
+    
+    best_params, best_score = load_best_hyperparameters()
+    if best_params:
+        logger.info(f"Found existing best hyperparameters with F1 score: {best_score:.4f}")
+    
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=TPESampler(seed=42),
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3)
+    )
+    
+    search_progress = tqdm(total=args.n_trials, desc="Hyperparameter Search", position=0)
+    
+    def callback(study, trial):
+        if study.best_trial == trial:
+            save_best_hyperparameters(trial.params, trial.value)
+        
+
+        search_progress.update(1)
+        search_progress.set_postfix({
+            "trial": f"{len(study.trials)}/{args.n_trials}",
+            "best_f1": f"{study.best_value:.4f}" if study.best_value else "N/A",
+            "current_f1": f"{trial.value:.4f}" if trial.value else "Pruned"
+        })
+    
+    study.optimize(
+        lambda trial: objective(trial, dataset, tokenizer, device, args.search_epochs),
+        n_trials=args.n_trials,
+        callbacks=[callback]
+    )
+    
+    search_progress.close()
+    
+    logger.info("Hyperparameter search completed!")
+    logger.info(f"Best F1 score: {study.best_value:.4f}")
+    logger.info(f"Best parameters: {study.best_params}")
+    
+    return study.best_params, study.best_value
+
+
 def main():
+    from transformers import RobertaTokenizer, RobertaModel
+    from data.aigcodeset import AIGCodeSet
+    from models.cbmclassifier import CBMClassifier
+    from utils.utils import tokenize_fn
+    
     args = parse_args()
-    print(args.epochs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
 
     dataset = AIGCodeSet(cache_dir=args.cache_dir)
+    tokenizer = RobertaTokenizer.from_pretrained(args.model_name)
+
+    if args.hyperparameter_search:
+        best_params, best_score = hyperparameter_search(args, dataset, tokenizer, device)
+        logger.info("Hyperparameter search completed. Use the found parameters for training.")
+        return
+    
+    best_params, _ = load_best_hyperparameters()
+    if best_params:
+        logger.info("Using saved best hyperparameters for training")
+
+        args.learning_rate = best_params.get("learning_rate", args.learning_rate)
+        args.batch_size = best_params.get("batch_size", args.batch_size)
+        args.weight_decay = best_params.get("weight_decay", args.weight_decay)
+        args.gradient_clip = best_params.get("gradient_clip", args.gradient_clip)
+        dropout_rate = best_params.get("dropout_rate", 0.5)
+        lstm_hidden_dim = best_params.get("lstm_hidden_dim", 256)
+        filter_sizes = best_params.get("filter_sizes", 768)
+        scheduler_type = best_params.get("scheduler", "cosine")
+    else:
+        logger.info("No saved hyperparameters found, using default values")
+        dropout_rate = 0.5
+        lstm_hidden_dim = 256
+        filter_sizes = 768
+        scheduler_type = "cosine"
+
+    print(f"Training with epochs: {args.epochs}")
+    
     train, val, test = dataset.get_dataset(
         split=True, test_size=args.test_size, val_size=args.val_size
     )
-    tokenizer = RobertaTokenizer.from_pretrained(args.model_name)
 
     tokenize = lambda x: tokenize_fn(tokenizer, x, max_length=512)
     train = train.map(tokenize, batched=True)
@@ -289,7 +524,12 @@ def main():
     test.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
 
     base_model = RobertaModel.from_pretrained('microsoft/codebert-base')
-    model = CBMClassifier(base_model=base_model).to(device)  
+    model = CBMClassifier(
+        base_model=base_model,
+        lstm_hidden_dim=lstm_hidden_dim,
+        filter_sizes=filter_sizes,
+        dropout_rate=dropout_rate
+    ).to(device)
 
     optimizer = torch.optim.AdamW(
         model.parameters(), 
@@ -298,7 +538,12 @@ def main():
         eps=1e-8
     )
     criterion = torch.nn.CrossEntropyLoss()
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-7)
+    
+    # Use the scheduler type from hyperparameters
+    if scheduler_type == "cosine":
+        scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-7)
+    else:
+        scheduler = StepLR(optimizer, step_size=args.epochs//3, gamma=0.1)
 
     train_dataloader = DataLoader(
         train, batch_size=args.batch_size, shuffle=True, num_workers=6, pin_memory=True
@@ -338,7 +583,7 @@ def main():
             args.gradient_clip,
         )
 
-    test_metrics = evaluate_model(test_dataloader, model, criterion, device)
+    test_metrics = evaluate_model(test_dataloader, model, criterion, device, log_to_mlflow=True)
     logger.info(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
     logger.info(f"Test F1: {test_metrics['f1']:.4f}")
     logger.info(f"Test Recall: {test_metrics['recall']:.4f}")
