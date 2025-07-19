@@ -23,6 +23,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+mlflow_run_name = "baseline_codet_full" 
+models_dir = "models/baseline_codet_full"
+
 
 def parse_args():
     """
@@ -204,7 +207,6 @@ def evaluate_model(
     }
 
     mlflow.set_experiment("AIGCodeSet")
-    mlflow_run_name = "baseline_codet" 
     experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
     runs = mlflow.search_runs(
         experiment_ids=[experiment_id],
@@ -219,7 +221,6 @@ def evaluate_model(
         mlflow.log_metric("precision", test_metrics["precision"])
         mlflow.log_metric("test_loss", test_metrics["loss"])
 
-        mlflow.pytorch.log_model(model, "model")
 
     return test_metrics
 
@@ -255,8 +256,8 @@ def train_model(
         torch.nn.Module: Trained model with best weights.
     """
     best_vloss = float("inf")
+    best_accuracy = 0.0
     patience_counter = 0
-    models_dir = "models/baseline_codet"
     os.makedirs(models_dir, exist_ok=True)
     best_model_path = os.path.join(models_dir, "best_model.pth")
 
@@ -276,11 +277,25 @@ def train_model(
 
         scheduler.step()
 
-        if val_metrics["loss"] < best_vloss:
-            best_vloss = val_metrics["loss"]
+        # Check if current model is better using both accuracy and loss
+        current_accuracy = val_metrics["accuracy"]
+        current_loss = val_metrics["loss"]
+        
+        # Model is better if accuracy improved OR (accuracy same but loss improved)
+        is_better = (current_accuracy > best_accuracy) or \
+               (current_accuracy == best_accuracy and current_loss < best_vloss)
+        
+        if is_better:
+            best_vloss = current_loss
+            best_accuracy = current_accuracy
             patience_counter = 0
             torch.save(model.state_dict(), best_model_path)
-            logger.info(f"Model saved with validation loss: {best_vloss:.4f}")
+            epoch_info_path = os.path.join(models_dir, "best_model_epoch.txt")
+            with open(epoch_info_path, "w") as f:
+                f.write(f"Best model saved from epoch: {epoch + 1}\n")
+                f.write(f"Validation accuracy: {best_accuracy:.4f}\n")
+                f.write(f"Validation loss: {best_vloss:.4f}\n")
+            logger.info(f"Model saved with accuracy: {best_accuracy:.4f}, loss: {best_vloss:.4f}")
         else:
             patience_counter += 1
             if patience_counter >= patience:
@@ -303,20 +318,21 @@ def main():
     train, val, test = dataset.get_dataset(
         columns=['code','target_binary'],
         split=['train','val','test'],
-        train_subset=0.1
+        train_subset=1.0,
+        dynamic_split_sizing=False,
     )
     tokenizer = RobertaTokenizer.from_pretrained(args.model_name)
 
     tokenize = lambda x: tokenize_fn(tokenizer, x)
-    train = train.map(tokenize, batched=True)
-    val = val.map(tokenize, batched=True)
-    test = test.map(tokenize, batched=True)
+    train = train.map(tokenize, batched=True, num_proc=12)
+    val = val.map(tokenize, batched=True, num_proc=12)
+    test = test.map(tokenize, batched=True, num_proc=12)
 
     train.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
     val.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
     test.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
 
-    model = SimpleLinearHeadClassifier(freeze_codebert=False).to(device)
+    model = SimpleLinearHeadClassifier(freeze_codebert=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.CrossEntropyLoss()
     scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
@@ -331,7 +347,6 @@ def main():
         test, batch_size=args.batch_size, num_workers=6, pin_memory=True
     )
 
-    models_dir = "models/baseline_codet"
     best_model_path = os.path.join(models_dir, "best_model.pth")
 
     if args.eval:
