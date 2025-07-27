@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import StepLR
 from torchmetrics import Accuracy, F1Score, Recall, Precision
 from transformers import RobertaTokenizer
 from tqdm import tqdm
-from data.codet_m4 import CoDeTM4
+from data.dataset.codet_m4 import CoDeTM4
 from models.baseline_model import SimpleLinearHeadClassifier
 from utils.utils import tokenize_fn
 import mlflow

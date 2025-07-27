@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import numpy as np
 import pandas as pd
 
-from data.aigcodeset_cst import AIGCodeSet_WithCSTFeatures
+from data.dataset.aigcodeset_cst import AIGCodeSet_WithCSTFeatures
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report

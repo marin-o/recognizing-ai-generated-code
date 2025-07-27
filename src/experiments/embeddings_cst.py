@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import StepLR
 from torchmetrics import Accuracy, F1Score, Recall, Precision
 from transformers import RobertaTokenizer
 from tqdm import tqdm
-from data.aigcodeset_cst import AIGCodeSet_WithCSTFeatures
+from data.dataset.aigcodeset_cst import AIGCodeSet_WithCSTFeatures
 from models.multimodal_classifier import SimpleMultimodalClassifier
 from utils.utils import tokenize_fn
 from sklearn.preprocessing import StandardScaler
