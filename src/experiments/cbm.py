@@ -473,7 +473,7 @@ def hyperparameter_search(args, dataset, tokenizer, device):
 
 def main():
     from transformers import RobertaTokenizer, RobertaModel
-    from data.dataset.aigcodeset import AIGCodeSet
+    from data.dataset import AIGCodeSet
     from models.cbmclassifier import CBMClassifier
     from utils.utils import tokenize_fn
     
