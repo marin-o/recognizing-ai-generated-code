@@ -42,6 +42,10 @@ class GraphCoDeTM4(InMemoryDataset):
     @property
     def processed_dir(self):
         return self.data_path  
+    
+    @property
+    def num_node_features(self):
+        return len(self.type_to_ind)
 
     def len(self):
         return len(self.graphs)
