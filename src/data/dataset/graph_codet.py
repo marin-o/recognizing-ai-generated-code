@@ -1,6 +1,7 @@
 from torch_geometric.data import Data, InMemoryDataset
 from torch import load
 import os
+import numpy as np
 
 class GraphCoDeTM4(InMemoryDataset):
     def __init__(self, data_dir: str, split: str='train'):
@@ -31,13 +32,14 @@ class GraphCoDeTM4(InMemoryDataset):
     def get(self, idx):
         return self.graphs[idx]
     
-
 if __name__ == '__main__':
     train_dataset = GraphCoDeTM4('data/codet_graphs/', split='train')
-    val_dataset = GraphCoDeTM4('data/codet_graphs/', split='val')
-    test_dataset = GraphCoDeTM4('data/codet_graphs/', split='test')
 
     print(f"Train dataset size: {len(train_dataset)}")
     print(f"Sample data object: {train_dataset[0]}")
+    print(f"Sample data object.x shape: {train_dataset[0].x.shape}")
 
+    graph_sizes = [len(graph.x) for graph in train_dataset]
+    print(f"Min: {min(graph_sizes)}, Max: {max(graph_sizes)}")
+    print(f"Mean: {np.mean(graph_sizes):.1f}, Std: {np.std(graph_sizes):.1f}")
 
