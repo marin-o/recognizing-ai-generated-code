@@ -18,9 +18,7 @@ class GCN(nn.Module):
         self.embedding_dim = embedding_dim
         self.num_node_features = num_node_features
 
-    def forward(self, data):
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-
+    def forward(self, x, edge_index, batch):
         x = self.emb(x)
         x = self.conv1(x, edge_index)
         x = F.relu(x)
@@ -57,7 +55,10 @@ if __name__ == "__main__":
     # Test forward pass
     model.eval()
     with torch.no_grad():
-        output = model(data)
+        x = data.x
+        edge_index = data.edge_index
+        batch = data.batch
+        output = model(x=x, edge_index=edge_index, batch=batch)
         print(f"Input shape: {x.shape}")
         print(f"Output shape: {output.shape}")
         print(f"Output sample: {output.squeeze().item():.4f}")
@@ -71,7 +72,10 @@ if __name__ == "__main__":
     data_batch = Data(x=x_batch, edge_index=edge_index_batch, batch=batch_tensor)
     
     with torch.no_grad():
-        output_batch = model(data_batch)
+        x = data_batch.x
+        edge_index = data_batch.edge_index
+        batch = data_batch.batch
+        output_batch = model(x=x, edge_index=edge_index, batch=batch)
         print(f"Batch input: {x_batch.shape} nodes, {batch_size} graphs")
         print(f"Batch output: {output_batch.shape}")
     
