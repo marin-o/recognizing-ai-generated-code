@@ -3,6 +3,7 @@
 !/data/aigcodeset_perturbations_levenshtein.json
 /models/
 /mlruns/
+/tensorboard_logs/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
