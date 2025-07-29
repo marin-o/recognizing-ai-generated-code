@@ -13,8 +13,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import GridSearchCV
 
-import mlflow
-import mlflow.sklearn
+from torch.utils.tensorboard import SummaryWriter
+import os
 
 
 logging.basicConfig(
@@ -168,60 +168,45 @@ def main():
     ):
         logger.info(f"{feat}: {imp:.4f}")
 
-    mlflow.set_experiment("AIGCodeSet")
-    experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
-    runs = mlflow.search_runs(
-        experiment_ids=[experiment_id],
-        filter_string="tags.mlflow.runName = 'random_forest'",
-        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
+    # Set up TensorBoard logging
+    log_dir = os.path.join("tensorboard_logs", "AIGCodeSet", "random_forest")
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+    
+    # Log metrics
+    writer.add_scalar("Metrics/test_accuracy", test_accuracy)
+    writer.add_scalar("Metrics/val_accuracy", val_accuracy)
+    writer.add_scalar("Metrics/test_f1_macro", 
+        classification_report(test_labels, test_predictions, output_dict=True)["macro avg"]["f1-score"])
+    writer.add_scalar("Metrics/val_f1_macro",
+        classification_report(val_labels, val_predictions, output_dict=True)["macro avg"]["f1-score"])
+    writer.add_scalar("Metrics/f1_macro",
+        classification_report(test_labels, test_predictions, output_dict=True)["macro avg"]["f1-score"])
+    writer.add_scalar("Metrics/recall",
+        classification_report(test_labels, test_predictions, output_dict=True)["macro avg"]["recall"])
+    writer.add_scalar("Metrics/precision",
+        classification_report(test_labels, test_predictions, output_dict=True)["macro avg"]["precision"])
+    
+    # Log hyperparameters
+    writer.add_text("Hyperparameters/n_estimators", str(model.n_estimators))
+    writer.add_text("Hyperparameters/max_depth", str(model.max_depth))
+    writer.add_text("Hyperparameters/min_samples_split", str(model.min_samples_split))
+    writer.add_text("Hyperparameters/min_samples_leaf", str(model.min_samples_leaf))
+
+    # Log feature importances as CSV artifact
+    feature_df = pd.DataFrame(
+        list(feature_importance.items()), columns=["Feature", "Importance"]
     )
-    run_id = runs["run_id"].iloc[0] if not runs.empty else None
-    with mlflow.start_run(run_id=run_id, run_name="random_forest") as run:
-        mlflow.log_metric("test_accuracy", test_accuracy)
-        mlflow.log_metric("val_accuracy", val_accuracy)
-        mlflow.log_metric(
-            "test_f1_macro",
-            classification_report(test_labels, test_predictions, output_dict=True)[
-                "macro avg"
-            ]["f1-score"],
-        )
-        mlflow.log_metric(
-            "val_f1_macro",
-            classification_report(val_labels, val_predictions, output_dict=True)[
-                "macro avg"
-            ]["f1-score"],
-        )
-        mlflow.log_metric(
-            "f1_macro",
-            classification_report(test_labels, test_predictions, output_dict=True)[
-                "macro avg"
-            ]["f1-score"],
-        )
-        mlflow.log_metric(
-            "recall",
-            classification_report(test_labels, test_predictions, output_dict=True)[
-                "macro avg"
-            ]["recall"],
-        )
-        mlflow.log_metric(
-            "precision",
-            classification_report(test_labels, test_predictions, output_dict=True)[
-                "macro avg"
-            ]["precision"],
-        )
-        mlflow.log_param("n_estimators", model.n_estimators)
-        mlflow.log_param("max_depth", model.max_depth)
-        mlflow.log_param("min_samples_split", model.min_samples_split)
-        mlflow.log_param("min_samples_leaf", model.min_samples_leaf)
-
-        # Log feature importances as CSV artifact
-        feature_df = pd.DataFrame(
-            list(feature_importance.items()), columns=["Feature", "Importance"]
-        )
-        feature_df.to_csv("feature_importances.csv", index=False)
-        mlflow.log_artifact("feature_importances.csv")
-
-        mlflow.sklearn.log_model(model, "model")
+    feature_csv_path = os.path.join(log_dir, "feature_importances.csv")
+    feature_df.to_csv(feature_csv_path, index=False)
+    
+    # Save model
+    model_path = os.path.join(log_dir, "random_forest_model.pkl")
+    import pickle
+    with open(model_path, 'wb') as f:
+        pickle.dump(model, f)
+    
+    writer.close()
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import mlflow.pytorch
+from torch.utils.tensorboard import SummaryWriter
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
@@ -15,7 +15,6 @@ from tqdm import tqdm
 from data.dataset import CoDeTM4
 from models.baseline_model import SimpleLinearHeadClassifier
 from utils.utils import tokenize_fn
-import mlflow
 
 # Configure logging
 logging.basicConfig(
@@ -206,21 +205,23 @@ def evaluate_model(
         "loss": avg_loss,
     }
 
-    mlflow.set_experiment("AIGCodeSet")
-    experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
-    runs = mlflow.search_runs(
-        experiment_ids=[experiment_id],
-        filter_string=f"tags.mlflow.runName = '{mlflow_run_name}'",
-        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
-    )
-    run_id = runs["run_id"].iloc[0] if not runs.empty else None
-    with mlflow.start_run(run_id=run_id, run_name=mlflow_run_name) as run:
-        mlflow.log_metric("test_accuracy", test_metrics["accuracy"])
-        mlflow.log_metric("test_f1_macro", test_metrics["f1"])
-        mlflow.log_metric("recall", test_metrics["recall"])
-        mlflow.log_metric("precision", test_metrics["precision"])
-        mlflow.log_metric("test_loss", test_metrics["loss"])
+    # Set up TensorBoard logging
+    log_dir = os.path.join("tensorboard_logs", "AIGCodeSet", mlflow_run_name)
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+    
+    # Log metrics
+    writer.add_scalar("Metrics/test_accuracy", test_metrics["accuracy"])
+    writer.add_scalar("Metrics/test_f1_macro", test_metrics["f1"])
+    writer.add_scalar("Metrics/recall", test_metrics["recall"])
+    writer.add_scalar("Metrics/precision", test_metrics["precision"])
+    writer.add_scalar("Metrics/test_loss", test_metrics["loss"])
 
+    # Save model
+    model_path = os.path.join(log_dir, "model.pth")
+    torch.save(model.state_dict(), model_path)
+    
+    writer.close()
 
     return test_metrics
 

@@ -8,6 +8,7 @@ from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from torchmetrics import Accuracy, F1Score, Recall, Precision
 from tqdm import tqdm
@@ -154,7 +155,7 @@ def evaluate_model(
     model: torch.nn.Module,
     criterion: torch.nn.Module,
     device: torch.device,
-    log_to_mlflow: bool = False,
+    log_to_tensorboard: bool = False,
 ) -> dict:
     model.eval()
 
@@ -203,23 +204,25 @@ def evaluate_model(
         "loss": avg_loss,
     }
 
-    if log_to_mlflow:
-        import mlflow
-        mlflow.set_experiment("AIGCodeSet")
-        mlflow_run_name = "cbm"
-        experiment_id = mlflow.get_experiment_by_name("AIGCodeSet").experiment_id
-        runs = mlflow.search_runs(
-            experiment_ids=[experiment_id],
-            filter_string=f"tags.mlflow.runName = '{mlflow_run_name}'",
-            run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
-        )
-        run_id = runs["run_id"].iloc[0] if not runs.empty else None
-        with mlflow.start_run(run_id=run_id, run_name=mlflow_run_name) as run:
-            mlflow.log_metric("test_accuracy", test_metrics["accuracy"])
-            mlflow.log_metric("test_f1_macro", test_metrics["f1"])
-            mlflow.log_metric("recall", test_metrics["recall"])
-            mlflow.log_metric("precision", test_metrics["precision"])
-            mlflow.log_metric("test_loss", test_metrics["loss"])
+    if log_to_tensorboard:
+        # Set up TensorBoard logging
+        tensorboard_run_name = "cbm"
+        log_dir = os.path.join("tensorboard_logs", "AIGCodeSet", tensorboard_run_name)
+        os.makedirs(log_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=log_dir)
+        
+        # Log metrics
+        writer.add_scalar("Metrics/test_accuracy", test_metrics["accuracy"])
+        writer.add_scalar("Metrics/test_f1_macro", test_metrics["f1"])
+        writer.add_scalar("Metrics/recall", test_metrics["recall"])
+        writer.add_scalar("Metrics/precision", test_metrics["precision"])
+        writer.add_scalar("Metrics/test_loss", test_metrics["loss"])
+        
+        # Save model
+        model_path = os.path.join(log_dir, "model.pth")
+        torch.save(model.state_dict(), model_path)
+        
+        writer.close()
 
     return test_metrics
 
@@ -253,7 +256,7 @@ def train_model(
         )
         logger.info(f"Average training loss: {avg_loss:.4f}")
 
-        val_metrics = evaluate_model(val_dataloader, model, criterion, device, log_to_mlflow=False)
+        val_metrics = evaluate_model(val_dataloader, model, criterion, device, log_to_tensorboard=False)
         logger.info(f"Validation loss: {val_metrics['loss']:.4f}")
         logger.info(f"Validation accuracy: {val_metrics['accuracy']:.4f}")
         logger.info(f"Validation F1: {val_metrics['f1']:.4f}")
@@ -393,7 +396,7 @@ def objective(trial, dataset, tokenizer, device, search_epochs):
             total_loss += loss.item()
         
 
-        val_metrics = evaluate_model(val_dataloader, model, criterion, device, log_to_mlflow=False)
+        val_metrics = evaluate_model(val_dataloader, model, criterion, device, log_to_tensorboard=False)
         scheduler.step()
         
         current_f1 = val_metrics['f1']
@@ -583,7 +586,7 @@ def main():
             args.gradient_clip,
         )
 
-    test_metrics = evaluate_model(test_dataloader, model, criterion, device, log_to_mlflow=True)
+    test_metrics = evaluate_model(test_dataloader, model, criterion, device, log_to_tensorboard=True)
     logger.info(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
     logger.info(f"Test F1: {test_metrics['f1']:.4f}")
     logger.info(f"Test Recall: {test_metrics['recall']:.4f}")
