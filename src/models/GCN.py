@@ -1,18 +1,23 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, AttentionalAggregation
+from torch_geometric.nn import GCNConv, AttentionalAggregation, SAGEConv, global_mean_pool
 from torch_geometric.data import Data
 
 
 class GCN(nn.Module):
-    def __init__(self, num_node_features, embedding_dim=256, hidden_dim=128):
+    def __init__(self, num_node_features, embedding_dim=256, hidden_dim=128, sage=False):
         super().__init__()
         self.emb = nn.Embedding(num_embeddings=num_node_features, embedding_dim=embedding_dim)
-        self.conv1 = GCNConv(embedding_dim, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        if sage:
+            self.conv1 = SAGEConv(embedding_dim, hidden_dim)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+        else:
+            self.conv1 = GCNConv(embedding_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, hidden_dim)
 
-        self.attention_pool = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim, 1))
+        # self.attention_pool = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim, 1))
+        self.attention_pool = global_mean_pool
         self.classifier = nn.Linear(hidden_dim, 1)
 
         self.embedding_dim = embedding_dim
