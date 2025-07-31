@@ -3,22 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, AttentionalAggregation, SAGEConv, global_mean_pool
 from torch_geometric.data import Data
+import warnings
 
 
 class GCN(nn.Module):
-    def __init__(self, num_node_features, embedding_dim=256, hidden_dim=128, sage=False):
+    def __init__(self, num_node_features, embedding_dim=256, hidden_dim_1=128, hidden_dim_2=128, sage=False):
         super().__init__()
         self.emb = nn.Embedding(num_embeddings=num_node_features, embedding_dim=embedding_dim)
         if sage:
-            self.conv1 = SAGEConv(embedding_dim, hidden_dim)
-            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+            self.conv1 = SAGEConv(embedding_dim, hidden_dim_1)
+            self.conv2 = SAGEConv(hidden_dim_1, hidden_dim_2)
         else:
-            self.conv1 = GCNConv(embedding_dim, hidden_dim)
-            self.conv2 = GCNConv(hidden_dim, hidden_dim)
+            self.conv1 = GCNConv(embedding_dim, hidden_dim_1)
+            self.conv2 = GCNConv(hidden_dim_1, hidden_dim_2)
 
         # self.attention_pool = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim, 1))
         self.attention_pool = global_mean_pool
-        self.classifier = nn.Linear(hidden_dim, 1)
+        self.classifier = nn.Linear(hidden_dim_2, 1)
 
         self.embedding_dim = embedding_dim
         self.num_node_features = num_node_features
@@ -41,7 +42,7 @@ if __name__ == "__main__":
     
     # Model parameters
     vocab_size = 1000 
-    model = GCN(num_node_features=vocab_size, embedding_dim=128, hidden_dim=64)
+    model = GCN(num_node_features=vocab_size, embedding_dim=128, hidden_dim_1=64)
     
     # Print model info
     total_params = sum(p.numel() for p in model.parameters())
