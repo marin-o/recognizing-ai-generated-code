@@ -11,6 +11,8 @@ from .gnn_utils import (
     load_data,
     load_single_data,
     load_multiple_data,
+    get_metrics,
+    create_objective,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     'load_data',
     'load_single_data',
     'load_multiple_data',
+    'get_metrics',
+    'create_objective',
 ]

@@ -1,11 +1,13 @@
 import os
 import random
 import numpy as np
+import optuna
 import torch
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
-from torchmetrics import Accuracy
+from torchmetrics import Accuracy, Precision, Recall, Specificity, AUROC
 from data.dataset import GraphCoDeTM4
+from models.GCN import GCN
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -182,16 +184,18 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, nu
         }
 
         if val_dataloader:
-            avg_val_loss, results = validate(model, val_dataloader, criterion, metrics)
+            avg_val_loss, val_metrics = validate(model, val_dataloader, criterion, metrics)
+            val_acc = val_metrics.get("Acc", 0)
+            val_auroc = val_metrics.get("AUROC", 0)
             postfix.update({
                 'Val Loss': f'{avg_val_loss:.4f}',
-                'Val Acc': f'{results.get("Acc", 0):.3f}',
-                'Val AUROC': f'{results.get("AUROC", 0):.3f}'
+                'Val Acc': f'{val_acc:.3f}',
+                'Val AUROC': f'{val_auroc:.3f}'
             })
 
             if avg_val_loss < best_vloss:
                 best_vloss = avg_val_loss
-                best_vacc = results['Acc']
+                best_vacc = val_acc
                 
                 save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path)
                 
@@ -225,7 +229,6 @@ def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], sh
     
     return loaders
 
-# Keep the original function as a convenience wrapper if needed for backward compatibility
 def load_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128):
     """
     Convenience function for backward compatibility.
@@ -236,3 +239,66 @@ def load_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=No
         return load_single_data(data_dir, splits, shuffle, batch_size)
     else:
         return load_multiple_data(data_dir, splits, shuffles, batch_size)
+
+def get_metrics():
+    metrics = {
+        'Acc': Accuracy(task='binary').to(DEVICE),
+        'Prec': Precision(task='binary').to(DEVICE),
+        'Rec': Recall(task='binary').to(DEVICE),
+        'Spec': Specificity(task='binary').to(DEVICE),
+        'AUROC': AUROC(task='binary').to(DEVICE)
+    }
+    return metrics
+
+def create_objective(train_dataloader, val_dataloader, num_epochs):
+    def objective(trial: optuna.Trial):
+        hidden_dim_1 = trial.suggest_int("hidden_dim_1", 128, 512, step=16)
+        hidden_dim_2 = trial.suggest_int("hidden_dim_2", 128, 512, step=16)
+        embedding_dim = trial.suggest_int("embedding_dim;", 64, 512, step=16)
+        sage = trial.suggest_categorical("sage", [True, False])
+        lr = trial.suggest_float('lr', low=0.0001, high=0.01, log=True)
+        
+        model = GCN(
+            train_dataloader.num_node_features,
+            hidden_dim_1=hidden_dim_1,
+            hidden_dim_2=hidden_dim_2,
+            embedding_dim=embedding_dim,
+            sage=sage,
+        ).to(DEVICE)
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        criterion = torch.nn.BCEWithLogitsLoss()
+        metrics = get_metrics()
+
+        epoch_pbar = tqdm(range(num_epochs), desc=f"Training trial #{trial.number}", unit=' epoch')
+        for epoch in epoch_pbar:
+            train_loss, train_metrics = train_epoch(
+                model, optimizer, criterion, train_dataloader, metrics, epoch
+            )
+
+            postfix = {
+                'Train Loss': f'{train_loss:.4f}',
+                'Train Acc': f'{train_metrics.get("Acc", 0):.3f}'
+            }
+
+            val_loss, val_metrics = validate(model, val_dataloader, criterion, metrics)
+            val_acc = val_metrics.get("Acc", 0)
+            val_auroc = val_metrics.get("AUROC", 0)
+            postfix.update({
+                'Val Loss': f'{val_loss:.4f}',
+                'Val Acc': f'{val_acc:.3f}',
+                'Val AUROC': f'{val_auroc:.3f}'
+            })
+
+            trial.report(val_loss, epoch)
+            # trial.report(val_acc, epoch)
+            # trial.report(val_rec, epoch)
+
+            epoch_pbar.set_postfix(postfix)
+
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+        return val_loss
+
+    return objective
