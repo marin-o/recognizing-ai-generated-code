@@ -405,7 +405,7 @@ if __name__ == "__main__":
             print("Training model...")
             if args.use_best_params:
                 # Create model with best hyperparameters from Optuna
-                model, optimizer, optuna_success = create_model_with_optuna_params(
+                model, optimizer, scheduler, optuna_success = create_model_with_optuna_params(
                     num_node_features=train_loader.dataset.num_node_features,
                     storage_url=args.storage_url,
                     study_name=args.study_name,
@@ -417,6 +417,13 @@ if __name__ == "__main__":
                     print("Failed to load Optuna parameters for training mode")
                     print(f"Make sure the study '{args.study_name}' exists in {args.storage_url}")
                     sys.exit(1)
+                    
+                # If Optuna didn't use a scheduler, create default one
+                if scheduler is None:
+                    print("Optuna study didn't use a scheduler, creating default scheduler...")
+                    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                        optimizer=optimizer, patience=5
+                    )
             else:
                 # Use default model architecture
                 model = GCN(
@@ -426,11 +433,13 @@ if __name__ == "__main__":
                 optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
                 model.name = MODEL_NAME
                 
+                # Create default scheduler
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer=optimizer, patience=5
+                )
+                
             criterion = torch.nn.BCEWithLogitsLoss()
             metrics = get_metrics()
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer=optimizer, patience=5
-            )
             train(
                 model=model,
                 optimizer=optimizer,

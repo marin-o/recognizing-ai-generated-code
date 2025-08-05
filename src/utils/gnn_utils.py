@@ -94,7 +94,7 @@ def load_model(model, optimizer, save_path='models/gnn', model_name=None, schedu
 
 def create_model_with_optuna_params(num_node_features, storage_url, study_name, model_name, use_default_on_failure=True):
     """
-    Create a GCN model and optimizer using best hyperparameters from Optuna study.
+    Create a GCN model, optimizer, and scheduler using best hyperparameters from Optuna study.
     
     Args:
         num_node_features: Number of input node features
@@ -104,8 +104,9 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
         use_default_on_failure: If True, create model with default params if Optuna loading fails
         
     Returns:
-        tuple: (model, optimizer, success_flag)
+        tuple: (model, optimizer, scheduler, success_flag)
         success_flag: True if loaded from Optuna, False if using defaults
+        scheduler: None if not used in optimization or if loading failed
     """
     try:
         study = optuna.load_study(storage=storage_url, study_name=study_name)
@@ -127,7 +128,20 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
         optimizer = torch.optim.Adam(model.parameters(), lr=best_params["lr"])
         model.name = model_name
         
-        return model, optimizer, True
+        # Create scheduler if it was used in optimization
+        scheduler = None
+        if best_params.get('use_scheduler', False):
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer=optimizer,
+                patience=best_params.get('scheduler_patience', 5),
+                factor=best_params.get('scheduler_factor', 0.5),
+                min_lr=best_params.get('scheduler_min_lr', 1e-6)
+            )
+            print(f"  Created scheduler with patience={best_params.get('scheduler_patience', 5)}, "
+                  f"factor={best_params.get('scheduler_factor', 0.5)}, "
+                  f"min_lr={best_params.get('scheduler_min_lr', 1e-6)}")
+        
+        return model, optimizer, scheduler, True
         
     except Exception as e:
         if use_default_on_failure:
@@ -137,9 +151,10 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
             # Fallback to default parameters
             model = GCN(num_node_features).to(DEVICE)
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5)
             model.name = model_name
             
-            return model, optimizer, False
+            return model, optimizer, scheduler, False
         else:
             raise e
 
@@ -417,6 +432,13 @@ def create_objective(train_dataloader, val_dataloader, num_epochs):
         sage = trial.suggest_categorical("sage", [True, False])
         lr = trial.suggest_float('lr', low=0.0001, high=0.01, log=True)
         
+        # Scheduler hyperparameters
+        use_scheduler = trial.suggest_categorical("use_scheduler", [True, False])
+        if use_scheduler:
+            scheduler_patience = trial.suggest_int("scheduler_patience", 3, 10)
+            scheduler_factor = trial.suggest_float("scheduler_factor", 0.1, 0.7)
+            scheduler_min_lr = trial.suggest_float("scheduler_min_lr", 1e-7, 1e-4, log=True)
+        
         model = GCN(
             train_dataloader.num_node_features,
             hidden_dim_1=hidden_dim_1,
@@ -426,6 +448,17 @@ def create_objective(train_dataloader, val_dataloader, num_epochs):
         ).to(DEVICE)
         
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        
+        # Create scheduler if suggested
+        scheduler = None
+        if use_scheduler:
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer=optimizer, 
+                patience=scheduler_patience,
+                factor=scheduler_factor,
+                min_lr=scheduler_min_lr
+            )
+        
         criterion = torch.nn.BCEWithLogitsLoss()
         metrics = get_metrics()
 
@@ -448,6 +481,10 @@ def create_objective(train_dataloader, val_dataloader, num_epochs):
                 'Val Acc': f'{val_acc:.3f}',
                 'Val AUROC': f'{val_auroc:.3f}'
             })
+
+            # Update scheduler if using one
+            if scheduler is not None:
+                scheduler.step(val_loss)
 
             trial.report(val_loss, epoch)
             # trial.report(val_acc, epoch)
