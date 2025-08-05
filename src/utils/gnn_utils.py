@@ -4,6 +4,7 @@ import numpy as np
 import optuna
 import torch
 from torch_geometric.loader import DataLoader
+from torch_geometric.nn import SAGEConv
 from tqdm import tqdm
 from torchmetrics import Accuracy, Precision, Recall, Specificity, AUROC
 from data.dataset import GraphCoDeTM4
@@ -12,46 +13,62 @@ from models.GCN import GCN
 DEVICE = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models/gnn'):
-    """Save model and optimizer state dictionaries"""
+    """Save model state dict, optimizer, and architecture information"""
     model_name = getattr(model, 'name', 'GCN')
     model_save_path = os.path.join(save_path, model_name)
     os.makedirs(model_save_path, exist_ok=True)
     
-    model_filename = f"{model_name}_best.pth"
-    model_filepath = os.path.join(model_save_path, model_filename)
-    optimizer_filename = f"{model_name}_optimizer_best.pth"
-    optimizer_filepath = os.path.join(model_save_path, optimizer_filename)
+    checkpoint_filename = f"{model_name}_best.pth"
+    checkpoint_filepath = os.path.join(model_save_path, checkpoint_filename)
     
-    torch.save(model.state_dict(), model_filepath)
+    # Extract model architecture parameters
+    model_config = {
+        'num_node_features': model.num_node_features,
+        'embedding_dim': model.embedding_dim,
+        'hidden_dim_1': model.conv1.out_channels,
+        'hidden_dim_2': model.conv2.out_channels,
+        'sage': isinstance(model.conv1, SAGEConv)
+    }
     
-    # Save optimizer state and training metadata
+    # Save everything in one checkpoint file
     torch.save({
+        'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
+        'model_config': model_config,
         'epoch': epoch,
         'best_vloss': best_vloss,
         'best_vacc': best_vacc
-    }, optimizer_filepath)
+    }, checkpoint_filepath)
     
     print(f"\nNew best model saved! Val Loss: {best_vloss:.4f}, Val Acc: {best_vacc:.4f}")
-    return model_filepath, optimizer_filepath
+    print(f"Model architecture: {model_config}")
+    return checkpoint_filepath
 
 def load_model(model, optimizer, save_path='models/gnn', model_name=None):
-    """Load model and optimizer state dictionaries"""
+    """Load model and optimizer state dictionaries with architecture verification"""
     if model_name is None:
         model_name = getattr(model, 'name', 'GCN')
     
     model_save_path = os.path.join(save_path, model_name)
-    model_filename = f"{model_name}_best.pth"
-    model_filepath = os.path.join(model_save_path, model_filename)
-    optimizer_filename = f"{model_name}_optimizer_best.pth"
-    optimizer_filepath = os.path.join(model_save_path, optimizer_filename)
+    checkpoint_filename = f"{model_name}_best.pth"
+    checkpoint_filepath = os.path.join(model_save_path, checkpoint_filename)
     
-    model.load_state_dict(torch.load(model_filepath, map_location=DEVICE))
+    checkpoint = torch.load(checkpoint_filepath, map_location=DEVICE)
     
-    checkpoint = torch.load(optimizer_filepath, map_location=DEVICE)
+    # Verify architecture compatibility if model_config is available
+    if 'model_config' in checkpoint:
+        saved_config = checkpoint['model_config']
+        print(f"Loaded model architecture: {saved_config}")
+        
+        # Basic compatibility checks
+        if hasattr(model, 'num_node_features') and model.num_node_features != saved_config['num_node_features']:
+            raise RuntimeError(f"Model architecture mismatch: expected {model.num_node_features} node features, "
+                             f"but saved model has {saved_config['num_node_features']}")
+    
+    model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     
-    print(f"Model loaded from {model_filepath}")
+    print(f"Model loaded from {checkpoint_filepath}")
     print(f"Best validation loss: {checkpoint['best_vloss']:.4f}")
     print(f"Best validation accuracy: {checkpoint['best_vacc']:.4f}")
     print(f"Saved at epoch: {checkpoint['epoch']}")
@@ -108,6 +125,58 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
             return model, optimizer, False
         else:
             raise e
+
+def create_model_from_checkpoint(checkpoint_path, model_name=None):
+    """
+    Create a GCN model and optimizer from a saved checkpoint file.
+    This function reconstructs the exact model architecture from saved configuration.
+    
+    Args:
+        checkpoint_path: Path to the saved checkpoint file
+        model_name: Optional model name override
+        
+    Returns:
+        tuple: (model, optimizer, epoch, best_vloss, best_vacc)
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
+    
+    if 'model_config' not in checkpoint:
+        raise ValueError("Checkpoint does not contain model configuration. "
+                        "This checkpoint was saved with an older version of the save function.")
+    
+    config = checkpoint['model_config']
+    print(f"Creating model from saved configuration: {config}")
+    
+    # Create model with exact same architecture
+    model = GCN(
+        num_node_features=config['num_node_features'],
+        embedding_dim=config['embedding_dim'],
+        hidden_dim_1=config['hidden_dim_1'],
+        hidden_dim_2=config['hidden_dim_2'],
+        sage=config['sage']
+    ).to(DEVICE)
+    
+    # Create optimizer (we don't save lr in config, so use a default)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    
+    # Load state dicts
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Set model name
+    if model_name:
+        model.name = model_name
+    elif hasattr(model, 'name'):
+        pass  # Keep existing name
+    else:
+        model.name = 'GCN'
+    
+    print(f"Model created and loaded from {checkpoint_path}")
+    print(f"Best validation loss: {checkpoint['best_vloss']:.4f}")
+    print(f"Best validation accuracy: {checkpoint['best_vacc']:.4f}")
+    print(f"Saved at epoch: {checkpoint['epoch']}")
+    
+    return model, optimizer, checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
 
 def set_seed(seed=42):
     """Set seeds for reproducibility"""

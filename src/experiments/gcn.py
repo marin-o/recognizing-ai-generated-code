@@ -53,7 +53,6 @@ def parse_args():
     )
     args = parser.parse_args()
     
-    # Set study name to model name if not provided
     if args.study_name is None:
         args.study_name = args.model_name
     
@@ -81,6 +80,7 @@ if __name__ == "__main__":
         load_multiple_data,
         create_objective,
         create_model_with_optuna_params,
+        create_model_from_checkpoint,
         DEVICE,
     )
     from tqdm import tqdm
@@ -95,29 +95,26 @@ if __name__ == "__main__":
         # Load test data
         test_dataloader = load_single_data(split="test", shuffle=False)
         
-        # Create model with best hyperparameters from Optuna
-        model, optimizer, optuna_success = create_model_with_optuna_params(
-            num_node_features=test_dataloader.dataset.num_node_features,
-            storage_url=args.storage_url,
-            study_name=args.study_name,
-            model_name=MODEL_NAME,
-            use_default_on_failure=True
-        )
+        # Load model directly from checkpoint (includes architecture info)
+        checkpoint_path = f"models/gnn/{MODEL_NAME}/{MODEL_NAME}_best.pth"
         
-        # Load the saved model
         try:
-            epoch, best_vloss, best_vacc = load_model(
-                model, optimizer, save_path="models/gnn"
+            model, optimizer, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
+                checkpoint_path, model_name=MODEL_NAME
             )
             print(f"Loaded model from epoch {epoch}")
+            print(f"Best validation loss: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
         except FileNotFoundError:
             print(f"Error: No saved model found for {MODEL_NAME}")
-            print(f"Expected path: models/gnn/{MODEL_NAME}/{MODEL_NAME}_best.pth")
+            print(f"Expected path: {checkpoint_path}")
             sys.exit(1)
-        except RuntimeError as e:
-            print(f"Error loading model state: {e}")
-            print("This usually means the saved model has different hyperparameters than expected.")
-            print("Make sure the Optuna study contains the correct hyperparameters for this model.")
+        except ValueError as e:
+            print(f"Error: {e}")
+            print("This checkpoint was saved with an older version that doesn't include architecture information.")
+            print("Please re-train the model or use the migration script.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error loading model: {e}")
             sys.exit(1)
         
         # Evaluate on test set
