@@ -12,8 +12,8 @@ from models.GCN import GCN
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models/gnn'):
-    """Save model state dict, optimizer, and architecture information"""
+def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models/gnn', scheduler=None):
+    """Save model state dict, optimizer, scheduler, and architecture information"""
     model_name = getattr(model, 'name', 'GCN')
     model_save_path = os.path.join(save_path, model_name)
     os.makedirs(model_save_path, exist_ok=True)
@@ -30,21 +30,31 @@ def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models
         'sage': isinstance(model.conv1, SAGEConv)
     }
     
-    # Save everything in one checkpoint file
-    torch.save({
+    # Prepare checkpoint data
+    checkpoint_data = {
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'model_config': model_config,
         'epoch': epoch,
         'best_vloss': best_vloss,
         'best_vacc': best_vacc
-    }, checkpoint_filepath)
+    }
+    
+    # Add scheduler state if provided
+    if scheduler is not None:
+        checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
+        checkpoint_data['scheduler_type'] = type(scheduler).__name__
+    
+    # Save everything in one checkpoint file
+    torch.save(checkpoint_data, checkpoint_filepath)
     
     print(f"\nNew best model saved! Val Loss: {best_vloss:.4f}, Val Acc: {best_vacc:.4f}")
     print(f"Model architecture: {model_config}")
+    if scheduler is not None:
+        print(f"Scheduler: {type(scheduler).__name__}")
     return checkpoint_filepath
 
-def load_model(model, optimizer, save_path='models/gnn', model_name=None):
+def load_model(model, optimizer, save_path='models/gnn', model_name=None, scheduler=None):
     """Load model and optimizer state dictionaries with architecture verification"""
     if model_name is None:
         model_name = getattr(model, 'name', 'GCN')
@@ -67,6 +77,13 @@ def load_model(model, optimizer, save_path='models/gnn', model_name=None):
     
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Load scheduler state if provided and available in checkpoint
+    if scheduler is not None and 'scheduler_state_dict' in checkpoint:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        print(f"Scheduler loaded: {checkpoint.get('scheduler_type', 'Unknown')}")
+    elif scheduler is not None and 'scheduler_state_dict' not in checkpoint:
+        print("Warning: Scheduler provided but no scheduler state found in checkpoint")
     
     print(f"Model loaded from {checkpoint_filepath}")
     print(f"Best validation loss: {checkpoint['best_vloss']:.4f}")
@@ -136,7 +153,8 @@ def create_model_from_checkpoint(checkpoint_path, model_name=None):
         model_name: Optional model name override
         
     Returns:
-        tuple: (model, optimizer, epoch, best_vloss, best_vacc)
+        tuple: (model, optimizer, scheduler, epoch, best_vloss, best_vacc)
+        Note: scheduler will be None if not saved in checkpoint
     """
     checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
     
@@ -163,6 +181,21 @@ def create_model_from_checkpoint(checkpoint_path, model_name=None):
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     
+    # Create and load scheduler if available in checkpoint
+    scheduler = None
+    if 'scheduler_state_dict' in checkpoint:
+        # For now, assume it's ReduceLROnPlateau - you might want to save scheduler config too
+        scheduler_type = checkpoint.get('scheduler_type', 'ReduceLROnPlateau')
+        print(f"Creating scheduler: {scheduler_type}")
+        
+        if scheduler_type == 'ReduceLROnPlateau':
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer=optimizer, patience=5
+            )
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        else:
+            print(f"Warning: Unknown scheduler type {scheduler_type}, skipping scheduler loading")
+    
     # Set model name
     if model_name:
         model.name = model_name
@@ -175,8 +208,10 @@ def create_model_from_checkpoint(checkpoint_path, model_name=None):
     print(f"Best validation loss: {checkpoint['best_vloss']:.4f}")
     print(f"Best validation accuracy: {checkpoint['best_vacc']:.4f}")
     print(f"Saved at epoch: {checkpoint['epoch']}")
+    if scheduler is not None:
+        print(f"Scheduler loaded: {scheduler_type}")
     
-    return model, optimizer, checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
+    return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
 
 def set_seed(seed=42):
     """Set seeds for reproducibility"""
@@ -320,7 +355,7 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, sc
                 best_vloss = avg_val_loss
                 best_vacc = val_acc
                 
-                save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path)
+                save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path, scheduler)
 
                 
 

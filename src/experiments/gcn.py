@@ -333,7 +333,7 @@ if __name__ == "__main__":
         checkpoint_path = f"models/gnn/{MODEL_NAME}/{MODEL_NAME}_best.pth"
         
         try:
-            model, optimizer, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
+            model, optimizer, scheduler, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
                 checkpoint_path, model_name=MODEL_NAME
             )
             print(f"Loaded model from epoch {epoch}")
@@ -455,7 +455,7 @@ if __name__ == "__main__":
             )
 
             epoch, best_vloss, best_vacc = load_model(
-                model, optimizer, save_path="models/gnn"
+                model, optimizer, save_path="models/gnn", scheduler=scheduler
             )
             test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
 
