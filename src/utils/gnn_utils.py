@@ -13,13 +13,14 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models/gnn'):
     """Save model and optimizer state dictionaries"""
-    os.makedirs(save_path, exist_ok=True)
-    
     model_name = getattr(model, 'name', 'GCN')
+    model_save_path = os.path.join(save_path, model_name)
+    os.makedirs(model_save_path, exist_ok=True)
+    
     model_filename = f"{model_name}_best.pth"
-    model_filepath = os.path.join(save_path, model_filename)
+    model_filepath = os.path.join(model_save_path, model_filename)
     optimizer_filename = f"{model_name}_optimizer_best.pth"
-    optimizer_filepath = os.path.join(save_path, optimizer_filename)
+    optimizer_filepath = os.path.join(model_save_path, optimizer_filename)
     
     torch.save(model.state_dict(), model_filepath)
     
@@ -39,15 +40,14 @@ def load_model(model, optimizer, save_path='models/gnn', model_name=None):
     if model_name is None:
         model_name = getattr(model, 'name', 'GCN')
     
+    model_save_path = os.path.join(save_path, model_name)
     model_filename = f"{model_name}_best.pth"
-    model_filepath = os.path.join(save_path, model_filename)
+    model_filepath = os.path.join(model_save_path, model_filename)
     optimizer_filename = f"{model_name}_optimizer_best.pth"
-    optimizer_filepath = os.path.join(save_path, optimizer_filename)
+    optimizer_filepath = os.path.join(model_save_path, optimizer_filename)
     
-    # Load model state
     model.load_state_dict(torch.load(model_filepath, map_location=DEVICE))
     
-    # Load optimizer state and metadata
     checkpoint = torch.load(optimizer_filepath, map_location=DEVICE)
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     
@@ -57,6 +57,57 @@ def load_model(model, optimizer, save_path='models/gnn', model_name=None):
     print(f"Saved at epoch: {checkpoint['epoch']}")
     
     return checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
+
+def create_model_with_optuna_params(num_node_features, storage_url, study_name, model_name, use_default_on_failure=True):
+    """
+    Create a GCN model and optimizer using best hyperparameters from Optuna study.
+    
+    Args:
+        num_node_features: Number of input node features
+        storage_url: Optuna storage URL
+        study_name: Name of the Optuna study
+        model_name: Name for the model (used for model.name attribute)
+        use_default_on_failure: If True, create model with default params if Optuna loading fails
+        
+    Returns:
+        tuple: (model, optimizer, success_flag)
+        success_flag: True if loaded from Optuna, False if using defaults
+    """
+    try:
+        study = optuna.load_study(storage=storage_url, study_name=study_name)
+        best_params = study.best_trial.params
+        
+        print("Loading model with best hyperparameters from Optuna:")
+        for key, value in best_params.items():
+            print(f"  {key}: {value}")
+        
+        # Create model with best hyperparameters
+        model = GCN(
+            num_node_features,
+            hidden_dim_1=best_params["hidden_dim_1"],
+            hidden_dim_2=best_params["hidden_dim_2"],
+            embedding_dim=best_params["embedding_dim"],
+            sage=best_params["sage"],
+        ).to(DEVICE)
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=best_params["lr"])
+        model.name = model_name
+        
+        return model, optimizer, True
+        
+    except Exception as e:
+        if use_default_on_failure:
+            print(f"Warning: Could not load Optuna study ({e})")
+            print("Using default model parameters...")
+            
+            # Fallback to default parameters
+            model = GCN(num_node_features).to(DEVICE)
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            model.name = model_name
+            
+            return model, optimizer, False
+        else:
+            raise e
 
 def set_seed(seed=42):
     """Set seeds for reproducibility"""
@@ -167,7 +218,7 @@ def train_epoch(model, optimizer, criterion, dataloader, metrics, epoch=None):
     final_metrics = {name: metric.compute().item() for name, metric in metrics.items()}
     return avg_loss, final_metrics
 
-def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, num_epochs=10, metrics={'Accuracy': Accuracy(task='binary')}, save_path='models/gnn'):
+def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, scheduler=None, num_epochs=10, metrics={'Accuracy': Accuracy(task='binary')}, save_path='models/gnn'):
     model.train()
     best_vloss = float('inf')
     best_vacc = 0.0
@@ -193,11 +244,15 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, nu
                 'Val AUROC': f'{val_auroc:.3f}'
             })
 
+            if scheduler:
+                scheduler.step(avg_val_loss)
+
             if avg_val_loss < best_vloss:
                 best_vloss = avg_val_loss
                 best_vacc = val_acc
                 
                 save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path)
+
                 
 
         epoch_pbar.set_postfix(postfix)
@@ -254,7 +309,7 @@ def create_objective(train_dataloader, val_dataloader, num_epochs):
     def objective(trial: optuna.Trial):
         hidden_dim_1 = trial.suggest_int("hidden_dim_1", 128, 512, step=16)
         hidden_dim_2 = trial.suggest_int("hidden_dim_2", 128, 512, step=16)
-        embedding_dim = trial.suggest_int("embedding_dim;", 64, 512, step=16)
+        embedding_dim = trial.suggest_int("embedding_dim", 64, 512, step=16)
         sage = trial.suggest_categorical("sage", [True, False])
         lr = trial.suggest_float('lr', low=0.0001, high=0.01, log=True)
         

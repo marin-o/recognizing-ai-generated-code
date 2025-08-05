@@ -13,6 +13,7 @@ from .gnn_utils import (
     load_multiple_data,
     get_metrics,
     create_objective,
+    create_model_with_optuna_params,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     'load_multiple_data',
     'get_metrics',
     'create_objective',
+    'create_model_with_optuna_params',
 ]
