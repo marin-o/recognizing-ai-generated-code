@@ -52,6 +52,32 @@ Note: If --use-best-params is specified, the script will load the best hyperpara
 from the Optuna study with the same name as the model.
         """,
         
+        'resume': """
+RESUME MODE HELP
+================
+
+Resume training from a saved model checkpoint.
+
+Usage:
+  python gcn.py --resume [OPTIONS]
+
+Key Options:
+  --model-name NAME         Name of the model to resume (default: baseline_gcn)
+  --epochs N               Additional epochs to train (default: 50)
+  --batch-size SIZE        Batch size for training (default: 128)
+  --device DEVICE          Device to use: auto/cpu/cuda (default: auto)
+
+Examples:
+  # Resume training for 100 more epochs
+  python gcn.py --resume --model-name my_model --epochs 100
+
+  # Resume training with larger batch size
+  python gcn.py --resume --model-name my_model --batch-size 256
+
+Note: The model checkpoint must exist at models/gnn/{model_name}/{model_name}_best.pth
+All hyperparameters (learning rate, architecture, scheduler) are loaded from the checkpoint.
+        """,
+        
         'optimize': """
 OPTIMIZE MODE HELP
 ==================
@@ -123,7 +149,7 @@ look for the model checkpoint at models/gnn/{model_name}/{model_name}_best.pth
         print(help_text[command])
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: train, optimize, eval")
+        print("Available commands: train, resume, optimize, eval")
         print("Use 'python gcn.py --help' for general help")
 
 
@@ -132,7 +158,7 @@ def parse_args():
     if len(sys.argv) >= 3 and sys.argv[1] == '-h':
         show_command_help(sys.argv[2])
         sys.exit(0)
-    elif len(sys.argv) >= 3 and sys.argv[2] == '-h' and sys.argv[1] in ['train', 'optimize', 'eval']:
+    elif len(sys.argv) >= 3 and sys.argv[2] == '-h' and sys.argv[1] in ['train', 'resume', 'optimize', 'eval']:
         show_command_help(sys.argv[1])
         sys.exit(0)
     
@@ -149,6 +175,9 @@ Examples:
 
   Training using best hyperparameters from optimization:
     python gcn.py --train --model-name my_model --use-best-params
+
+  Resume training from a checkpoint:
+    python gcn.py --resume --model-name my_model --epochs 100
 
   Hyperparameter optimization with 100 trials:
     python gcn.py --optimize --model-name my_model --n-trials 100
@@ -168,6 +197,7 @@ Examples:
 
 Command-specific help:
     python gcn.py -h train      # Show detailed help for training mode
+    python gcn.py -h resume     # Show detailed help for resume mode
     python gcn.py -h optimize   # Show detailed help for optimization mode
     python gcn.py -h eval       # Show detailed help for evaluation mode
         """,
@@ -179,6 +209,11 @@ Command-specific help:
         "--train",
         action="store_true",
         help="Train a new model with default or specified hyperparameters"
+    )
+    mode_group.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from a saved checkpoint"
     )
     mode_group.add_argument(
         "--optimize",
@@ -281,6 +316,9 @@ Command-specific help:
     # Validate mode-specific arguments
     if args.use_best_params and not args.train:
         parser.error("--use-best-params can only be used with --train mode")
+    
+    if args.resume and args.use_best_params:
+        parser.error("--use-best-params cannot be used with --resume mode (parameters are loaded from checkpoint)")
     
     if args.optimize and args.epochs < 10:
         print("Warning: Using less than 10 epochs for optimization may not give good results")
@@ -470,6 +508,80 @@ if __name__ == "__main__":
 
             print("\n" + "=" * 50)
             print("FINAL TEST RESULTS:")
+            print("=" * 50)
+            print(f"Test Loss: {test_loss:.4f}")
+            for metric_name, metric_value in test_metrics.items():
+                print(f"Test {metric_name}: {metric_value:.4f}")
+            print("=" * 50)
+
+        elif args.resume:
+            print("Resuming model training...")
+            
+            # Load model directly from checkpoint (includes architecture info)
+            checkpoint_path = f"models/gnn/{MODEL_NAME}/{MODEL_NAME}_best.pth"
+            
+            try:
+                model, optimizer, scheduler, start_epoch, best_vloss, best_vacc = create_model_from_checkpoint(
+                    checkpoint_path, model_name=MODEL_NAME
+                )
+                print(f"Resuming from epoch {start_epoch}")
+                print(f"Best validation loss so far: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
+            except FileNotFoundError:
+                print(f"Error: No saved model found for {MODEL_NAME}")
+                print(f"Expected path: {checkpoint_path}")
+                print("Use --train mode to train a new model")
+                sys.exit(1)
+            except ValueError as e:
+                print(f"Error: {e}")
+                print("This checkpoint was saved with an older version that doesn't include architecture information.")
+                print("Please re-train the model or use the migration script.")
+                sys.exit(1)
+            except Exception as e:
+                print(f"Error loading model: {e}")
+                sys.exit(1)
+            
+            # If no scheduler was saved, create a default one
+            if scheduler is None:
+                print("No scheduler found in checkpoint, creating default scheduler...")
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer=optimizer, patience=5
+                )
+                
+            criterion = torch.nn.BCEWithLogitsLoss()
+            metrics = get_metrics()
+            
+            # Continue training for additional epochs
+            print(f"Continuing training for {args.epochs} more epochs...")
+            train(
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                criterion=criterion,
+                train_dataloader=train_loader,
+                val_dataloader=val_loader,
+                metrics=metrics,
+                num_epochs=args.epochs,
+            )
+
+            # Clean up RAM to make room for the evaluation data
+            del train_loader, val_loader
+            gc.collect()
+
+            # Final evaluation on test set
+            test_dataloader = load_single_data(
+                data_dir=args.data_dir,
+                split="test", 
+                shuffle=False,
+                batch_size=args.batch_size
+            )
+
+            epoch, best_vloss, best_vacc = load_model(
+                model, optimizer, save_path="models/gnn", scheduler=scheduler
+            )
+            test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+
+            print("\n" + "=" * 50)
+            print("RESUMED TRAINING - FINAL TEST RESULTS:")
             print("=" * 50)
             print(f"Test Loss: {test_loss:.4f}")
             for metric_name, metric_value in test_metrics.items():
