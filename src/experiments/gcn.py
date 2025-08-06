@@ -456,12 +456,10 @@ if __name__ == "__main__":
                     print(f"Make sure the study '{args.study_name}' exists in {args.storage_url}")
                     sys.exit(1)
                     
-                # If Optuna didn't use a scheduler, create default one
+                # Don't create a default scheduler if Optuna didn't use one
+                # This ensures training matches the optimized configuration
                 if scheduler is None:
-                    print("Optuna study didn't use a scheduler, creating default scheduler...")
-                    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                        optimizer=optimizer, patience=5
-                    )
+                    print("Optuna study didn't use a scheduler, training without scheduler...")
             else:
                 # Use default model architecture
                 model = GCN(
@@ -540,12 +538,9 @@ if __name__ == "__main__":
                 print(f"Error loading model: {e}")
                 sys.exit(1)
             
-            # If no scheduler was saved, create a default one
+            # Respect the original scheduler configuration from checkpoint
             if scheduler is None:
-                print("No scheduler found in checkpoint, creating default scheduler...")
-                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                    optimizer=optimizer, patience=5
-                )
+                print("No scheduler was used in original training, continuing without scheduler...")
                 
             criterion = torch.nn.BCEWithLogitsLoss()
             metrics = get_metrics()
