@@ -556,6 +556,8 @@ if __name__ == "__main__":
                 val_dataloader=val_loader,
                 metrics=metrics,
                 num_epochs=args.epochs,
+                initial_best_vloss=best_vloss,
+                initial_best_vacc=best_vacc,
             )
 
             # Clean up RAM to make room for the evaluation data

@@ -337,10 +337,10 @@ def train_epoch(model, optimizer, criterion, dataloader, metrics, epoch=None):
     final_metrics = {name: metric.compute().item() for name, metric in metrics.items()}
     return avg_loss, final_metrics
 
-def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, scheduler=None, num_epochs=10, metrics={'Accuracy': Accuracy(task='binary')}, save_path='models/gnn'):
+def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, scheduler=None, num_epochs=10, metrics={'Accuracy': Accuracy(task='binary')}, save_path='models/gnn', initial_best_vloss=None, initial_best_vacc=None):
     model.train()
-    best_vloss = float('inf')
-    best_vacc = 0.0
+    best_vloss = initial_best_vloss if initial_best_vloss is not None else float('inf')
+    best_vacc = initial_best_vacc if initial_best_vacc is not None else 0.0
     epoch_pbar = tqdm(range(num_epochs), desc="Training model...", unit=' epoch')
     for epoch in epoch_pbar:
         
