@@ -9,6 +9,7 @@ from config.gcn_config import parse_args
 if __name__ == "__main__":
     args = parse_args()
     MODEL_NAME = args.model_name
+    SUFFIX = args.data_suffix
     import optuna
     from optuna.trial import TrialState
     import torch
@@ -52,7 +53,8 @@ if __name__ == "__main__":
             data_dir=args.data_dir,
             split="test", 
             shuffle=False,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            suffix=SUFFIX,
         )
         
         # Load model directly from checkpoint (includes architecture info)
@@ -101,7 +103,8 @@ if __name__ == "__main__":
         # Training or optimization mode
         train_loader, val_loader = load_multiple_data(
             data_dir=args.data_dir,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            suffix=SUFFIX,
         )
 
         if args.optimize:
@@ -146,6 +149,7 @@ if __name__ == "__main__":
             print("Training model...")
             if args.use_best_params:
                 # Create model with best hyperparameters from Optuna
+                print(train_loader.dataset.num_node_features)
                 model, optimizer, scheduler, optuna_success = create_model_with_optuna_params(
                     num_node_features=train_loader.dataset.num_node_features,
                     storage_url=args.storage_url,
@@ -200,7 +204,8 @@ if __name__ == "__main__":
                 data_dir=args.data_dir,
                 split="test", 
                 shuffle=False,
-                batch_size=args.batch_size
+                batch_size=args.batch_size,
+                suffix=SUFFIX,
             )
 
             epoch, best_vloss, best_vacc = load_model(
@@ -282,7 +287,8 @@ if __name__ == "__main__":
                 data_dir=args.data_dir,
                 split="test", 
                 shuffle=False,
-                batch_size=args.batch_size
+                batch_size=args.batch_size,
+                suffix=SUFFIX,
             )
 
             epoch, best_vloss, best_vacc = load_model(

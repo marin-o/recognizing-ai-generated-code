@@ -287,6 +287,11 @@ Command-specific help:
         default="data/codet_graphs",
         help="Directory containing the graph data"
     )
+    data_group.add_argument(
+        "--data-suffix",
+        type=str,
+        help="The suffix in the data file's filename (eg with 'comments' passed -> train_graphs_comments.pt)"
+    )
     
     # System parameters
     system_group = parser.add_argument_group("System Parameters")

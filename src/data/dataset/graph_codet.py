@@ -5,9 +5,10 @@ import numpy as np
 import time
 
 class GraphCoDeTM4(InMemoryDataset):
-    def __init__(self, data_dir: str, split: str='train'):
+    def __init__(self, data_dir: str, split: str='train', suffix: str=''):
         self.data_path = data_dir
         self.split = split
+        self.suffix = suffix
         self.graphs = None
         self.type_to_ind = None
         super(GraphCoDeTM4, self).__init__(root=None)
@@ -16,7 +17,12 @@ class GraphCoDeTM4(InMemoryDataset):
         self.type_to_ind = self._load_type_mapping()
         
     def _load_graphs(self):
-        graph_file = os.path.join(self.data_path, f'{self.split}_graphs.pt')
+        # Construct filename with optional suffix
+        if self.suffix:
+            graph_file = os.path.join(self.data_path, f'{self.split}_graphs_{self.suffix}.pt')
+        else:
+            graph_file = os.path.join(self.data_path, f'{self.split}_graphs.pt')
+        
         print(f"Loading {self.split} graphs from {graph_file}...")
         file_size = os.path.getsize(graph_file) / (1024 * 1024)  # Size in MB
         print(f"File size: {file_size:.1f} MB")
@@ -27,7 +33,10 @@ class GraphCoDeTM4(InMemoryDataset):
         return graphs
 
     def _load_type_mapping(self):
-        type_file = os.path.join(self.data_path, 'type_to_ind.pt')
+        if self.suffix:
+            type_file = os.path.join(self.data_path, f'type_to_ind_{self.suffix}.pt')
+        else:
+            type_file = os.path.join(self.data_path, 'type_to_ind.pt')
         if os.path.exists(type_file):
             print("Loading type mapping...")
             type_to_ind = load(type_file, weights_only=False)
@@ -37,7 +46,10 @@ class GraphCoDeTM4(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f'{self.split}_graphs.pt', 'type_to_ind.pt']
+        if self.suffix:
+            return [f'{self.split}_graphs_{self.suffix}.pt', f'type_to_ind_{self.suffix}.pt']
+        else:
+            return [f'{self.split}_graphs.pt', 'type_to_ind.pt']
     
     @property
     def processed_dir(self):
@@ -54,12 +66,15 @@ class GraphCoDeTM4(InMemoryDataset):
         return self.graphs[idx]
     
 if __name__ == '__main__':
+    # Example 1: Load standard graphs
     train_dataset = GraphCoDeTM4('data/codet_graphs/', split='train')
-
     print(f"Train dataset size: {len(train_dataset)}")
     print(f"Sample data object: {train_dataset[0]}")
     print(f"Sample data object.x shape: {train_dataset[1].x.shape}")
-
+    
+    # Example 2: Load graphs with suffix (e.g., comments)
+    # train_dataset_comments = GraphCoDeTM4('data/codet_graphs/', split='train', suffix='comments')
+    
     graph_sizes = [len(graph.x) for graph in train_dataset]
     print(f"Min: {min(graph_sizes)}, Max: {max(graph_sizes)}")
     print(f"Mean: {np.mean(graph_sizes):.1f}, Std: {np.std(graph_sizes):.1f}")

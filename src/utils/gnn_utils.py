@@ -392,15 +392,15 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, sc
 
         epoch_pbar.set_postfix(postfix)
 
-def load_single_data(data_dir='data/codet_graphs', split='train', shuffle=True, batch_size=128):
+def load_single_data(data_dir='data/codet_graphs', split='train', shuffle=True, batch_size=128, suffix=''):
     """Load a single data split and return a DataLoader."""
-    data = GraphCoDeTM4(data_dir, split=split)
+    data = GraphCoDeTM4(data_dir, split=split, suffix=suffix)
     loader = DataLoader(data, batch_size=batch_size, shuffle=shuffle)
     loader.num_node_features = data.num_node_features
     del data
     return loader
 
-def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128):
+def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128, suffix=''):
     """Load multiple data splits and return a list of DataLoaders."""
     if shuffles is None:
         shuffles = [True] * len(splits)
@@ -414,7 +414,7 @@ def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], sh
     
     loaders = []
     for split, shuffle in zip(splits, shuffles):
-        loader = load_single_data(data_dir, split, shuffle, batch_size)
+        loader = load_single_data(data_dir, split, shuffle, batch_size, suffix)
         loaders.append(loader)
     
     return loaders
