@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, AttentionalAggregation, SAGEConv, global_mean_pool
 from torch_geometric.data import Data
-import warnings
 
 
 class GCN(nn.Module):
@@ -18,7 +17,7 @@ class GCN(nn.Module):
             self.conv2 = GCNConv(hidden_dim_1, hidden_dim_2)
 
         # self.attention_pool = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim, 1))
-        self.attention_pool = global_mean_pool
+        self.pooling = global_mean_pool
         self.classifier = nn.Linear(hidden_dim_2, 1)
 
         self.embedding_dim = embedding_dim
@@ -32,7 +31,7 @@ class GCN(nn.Module):
         x = self.conv2(x, edge_index)
         x = F.relu(x)
 
-        x = self.attention_pool(x, batch)
+        x = self.pooling(x, batch)
         x = self.classifier(x)
 
         return x
@@ -86,3 +85,5 @@ if __name__ == "__main__":
         print(f"Batch output: {output_batch.shape}")
     
     print("Model test completed successfully!")
+
+# posebni grafovi, dataflow, comments next steps

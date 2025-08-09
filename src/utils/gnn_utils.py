@@ -6,7 +6,7 @@ import torch
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import SAGEConv
 from tqdm import tqdm
-from torchmetrics import Accuracy, Precision, Recall, Specificity, AUROC
+from torchmetrics import Accuracy, F1Score, Precision, Recall, Specificity, AUROC
 from data.dataset import GraphCoDeTM4
 from models.GCN import GCN
 
@@ -420,7 +420,8 @@ def get_metrics():
         'Prec': Precision(task='binary').to(DEVICE),
         'Rec': Recall(task='binary').to(DEVICE),
         'Spec': Specificity(task='binary').to(DEVICE),
-        'AUROC': AUROC(task='binary').to(DEVICE)
+        'AUROC': AUROC(task='binary').to(DEVICE),
+        'F1': F1Score(task='binary').to(DEVICE)
     }
     return metrics
 
