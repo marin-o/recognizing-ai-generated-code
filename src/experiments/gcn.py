@@ -32,8 +32,16 @@ if __name__ == "__main__":
     )
     from tqdm import tqdm
     import gc
+    from torch.utils.tensorboard import SummaryWriter
 
     set_seed(args.seed)
+    
+    # Initialize tensorboard writer if not disabled
+    writer = None
+    if not args.disable_tensorboard:
+        log_dir = os.path.join(args.log_dir, MODEL_NAME)
+        writer = SummaryWriter(log_dir=log_dir)
+        print(f"Tensorboard logging enabled: {log_dir}")
     
     if args.eval:
         # Evaluation mode only - load model and evaluate on test set
@@ -74,6 +82,13 @@ if __name__ == "__main__":
         metrics = get_metrics()
         test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
 
+        # Log evaluation results to tensorboard
+        if writer is not None:
+            writer.add_scalar("eval/test_loss", test_loss, epoch)
+            for metric_name, metric_value in test_metrics.items():
+                writer.add_scalar(f"eval/test_{metric_name.lower()}", metric_value, epoch)
+            writer.close()
+
         print("\n" + "=" * 50)
         print("EVALUATION RESULTS:")
         print("=" * 50)
@@ -102,8 +117,16 @@ if __name__ == "__main__":
                 train_dataloader=train_loader,
                 val_dataloader=val_loader,
                 num_epochs=args.epochs,
+                writer=writer,
             )
             study.optimize(objective, n_trials=args.n_trials)
+
+            # Log optimization results
+            if writer is not None:
+                writer.add_scalar("optuna/best_value", study.best_trial.value, len(study.trials))
+                for key, value in study.best_trial.params.items():
+                    writer.add_scalar(f"optuna/best_params/{key}", value, len(study.trials))
+                writer.close()
 
             pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
             complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
@@ -165,6 +188,7 @@ if __name__ == "__main__":
                 val_dataloader=val_loader,
                 metrics=metrics,
                 num_epochs=args.epochs,
+                writer=writer,
             )
 
             # Clean up RAM to make room for the evaluation data
@@ -183,6 +207,13 @@ if __name__ == "__main__":
                 model, optimizer, save_path="models/gnn", scheduler=scheduler
             )
             test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+
+            # Log final test results
+            if writer is not None:
+                writer.add_scalar("final/test_loss", test_loss, epoch)
+                for metric_name, metric_value in test_metrics.items():
+                    writer.add_scalar(f"final/test_{metric_name.lower()}", metric_value, epoch)
+                writer.close()
 
             print("\n" + "=" * 50)
             print("FINAL TEST RESULTS:")
@@ -238,6 +269,8 @@ if __name__ == "__main__":
                 num_epochs=args.epochs,
                 initial_best_vloss=best_vloss,
                 initial_best_vacc=best_vacc,
+                writer=writer,
+                start_epoch=start_epoch,
             )
 
             # Clean up RAM to make room for the evaluation data
@@ -256,6 +289,13 @@ if __name__ == "__main__":
                 model, optimizer, save_path="models/gnn", scheduler=scheduler
             )
             test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+
+            # Log resumed training final test results
+            if writer is not None:
+                writer.add_scalar("resumed/test_loss", test_loss, epoch)
+                for metric_name, metric_value in test_metrics.items():
+                    writer.add_scalar(f"resumed/test_{metric_name.lower()}", metric_value, epoch)
+                writer.close()
 
             print("\n" + "=" * 50)
             print("RESUMED TRAINING - FINAL TEST RESULTS:")

@@ -337,12 +337,13 @@ def train_epoch(model, optimizer, criterion, dataloader, metrics, epoch=None):
     final_metrics = {name: metric.compute().item() for name, metric in metrics.items()}
     return avg_loss, final_metrics
 
-def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, scheduler=None, num_epochs=10, metrics={'Accuracy': Accuracy(task='binary')}, save_path='models/gnn', initial_best_vloss=None, initial_best_vacc=None):
+def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, scheduler=None, num_epochs=10, metrics={'Accuracy': Accuracy(task='binary')}, save_path='models/gnn', initial_best_vloss=None, initial_best_vacc=None, writer=None, start_epoch=0):
     model.train()
     best_vloss = initial_best_vloss if initial_best_vloss is not None else float('inf')
     best_vacc = initial_best_vacc if initial_best_vacc is not None else 0.0
     epoch_pbar = tqdm(range(num_epochs), desc="Training model...", unit=' epoch')
     for epoch in epoch_pbar:
+        current_epoch = start_epoch + epoch
         
         avg_train_loss, train_results = train_epoch(
             model, optimizer, criterion, train_dataloader, metrics, epoch
@@ -352,6 +353,12 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, sc
             'Train Loss': f'{avg_train_loss:.4f}',
             'Train Acc': f'{train_results.get("Acc", 0):.3f}'
         }
+
+        # Log training metrics to tensorboard
+        if writer is not None:
+            writer.add_scalar("train/loss", avg_train_loss, current_epoch)
+            for metric_name, metric_value in train_results.items():
+                writer.add_scalar(f"train/{metric_name.lower()}", metric_value, current_epoch)
 
         if val_dataloader:
             avg_val_loss, val_metrics = validate(model, val_dataloader, criterion, metrics)
@@ -363,6 +370,17 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, sc
                 'Val AUROC': f'{val_auroc:.3f}'
             })
 
+            # Log validation metrics to tensorboard
+            if writer is not None:
+                writer.add_scalar("val/loss", avg_val_loss, current_epoch)
+                for metric_name, metric_value in val_metrics.items():
+                    writer.add_scalar(f"val/{metric_name.lower()}", metric_value, current_epoch)
+                
+                # Log learning rate if scheduler is present
+                if scheduler is not None:
+                    current_lr = optimizer.param_groups[0]['lr']
+                    writer.add_scalar("train/learning_rate", current_lr, current_epoch)
+
             if scheduler:
                 scheduler.step(avg_val_loss)
 
@@ -370,9 +388,7 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, sc
                 best_vloss = avg_val_loss
                 best_vacc = val_acc
                 
-                save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path, scheduler)
-
-                
+                save_model(model, optimizer, current_epoch, best_vloss, best_vacc, save_path, scheduler)
 
         epoch_pbar.set_postfix(postfix)
 
@@ -425,7 +441,7 @@ def get_metrics():
     }
     return metrics
 
-def create_objective(train_dataloader, val_dataloader, num_epochs):
+def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
     def objective(trial: optuna.Trial):
         hidden_dim_1 = trial.suggest_int("hidden_dim_1", 128, 512, step=16)
         hidden_dim_2 = trial.suggest_int("hidden_dim_2", 128, 512, step=16)
@@ -483,13 +499,18 @@ def create_objective(train_dataloader, val_dataloader, num_epochs):
                 'Val AUROC': f'{val_auroc:.3f}'
             })
 
+            # Log trial metrics to tensorboard
+            if writer is not None:
+                trial_tag = f"trial_{trial.number}"
+                writer.add_scalar(f"optuna/{trial_tag}/train_loss", train_loss, epoch)
+                writer.add_scalar(f"optuna/{trial_tag}/val_loss", val_loss, epoch)
+                writer.add_scalar(f"optuna/{trial_tag}/val_acc", val_acc, epoch)
+
             # Update scheduler if using one
             if scheduler is not None:
                 scheduler.step(val_loss)
 
             trial.report(val_loss, epoch)
-            # trial.report(val_acc, epoch)
-            # trial.report(val_rec, epoch)
 
             epoch_pbar.set_postfix(postfix)
 

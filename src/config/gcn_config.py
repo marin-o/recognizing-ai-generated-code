@@ -23,7 +23,7 @@ Usage:
   python gcn.py --train [OPTIONS]
 
 Key Options:
-  --model-name NAME         Name of the model (default: baseline_gcn)
+  --model-name NAME         Name of the model (default: gcn_baseline)
   --use-best-params        Use best hyperparameters from Optuna study
   --epochs N               Number of training epochs (default: 50)
   --learning-rate RATE     Learning rate for optimizer (default: 0.001)
@@ -58,7 +58,7 @@ Usage:
   python gcn.py --resume [OPTIONS]
 
 Key Options:
-  --model-name NAME         Name of the model to resume (default: baseline_gcn)
+  --model-name NAME         Name of the model to resume (default: gcn_baseline)
   --epochs N               Additional epochs to train (default: 50)
   --batch-size SIZE        Batch size for training (default: 128)
   --device DEVICE          Device to use: auto/cpu/cuda (default: auto)
@@ -84,7 +84,7 @@ Usage:
   python gcn.py --optimize [OPTIONS]
 
 Key Options:
-  --model-name NAME         Name of the model/study (default: baseline_gcn)
+  --model-name NAME         Name of the model/study (default: gcn_baseline)
   --n-trials N             Number of optimization trials (default: 50)
   --study-name NAME        Custom Optuna study name (default: same as model-name)
   --storage-url URL        Optuna database URL (default: sqlite:///optuna/gcn.db)
@@ -118,7 +118,7 @@ Usage:
   python gcn.py --eval [OPTIONS]
 
 Key Options:
-  --model-name NAME         Name of the model to evaluate (default: baseline_gcn)
+  --model-name NAME         Name of the model to evaluate (default: gcn_baseline)
   --batch-size SIZE        Batch size for evaluation (default: 128)
   --data-dir DIR           Directory containing graph data (default: data/codet_graphs)
   --device DEVICE          Device to use: auto/cpu/cuda (default: auto)
@@ -228,7 +228,7 @@ Command-specific help:
     model_group.add_argument(
         "--model-name",
         type=str,
-        default="baseline_gcn",
+        default="gcn_baseline",
         help="Name of the model (affects save location and Optuna study name)"
     )
     model_group.add_argument(
@@ -302,6 +302,20 @@ Command-specific help:
         choices=["auto", "cpu", "cuda"],
         default="auto",
         help="Device to use for training/evaluation"
+    )
+    
+    # Logging parameters
+    logging_group = parser.add_argument_group("Logging Parameters")
+    logging_group.add_argument(
+        "--log-dir",
+        type=str,
+        default="runs",
+        help="Base directory for tensorboard logs"
+    )
+    logging_group.add_argument(
+        "--disable-tensorboard",
+        action="store_true",
+        help="Disable tensorboard logging"
     )
     
     args = parser.parse_args()
