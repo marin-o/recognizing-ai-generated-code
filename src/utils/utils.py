@@ -14,7 +14,7 @@ def tokenize_fn(
         max_length (int): Maximum sequence length for tokenization. Defaults to 512.
 
     Returns:
-        Dict[str, Any]: Tokenized inputs with all original columns preserved, target at end.
+        Dict[str, Any]: Tokenized inputs with all original columns preserved, target/target_binary at end.
 
     Raises:
         ValueError: If 'code' key is missing in examples.
@@ -30,12 +30,14 @@ def tokenize_fn(
         return_tensors=None,
     )
 
-    # Create result without target first
-    examples_without_target = {k: v for k, v in examples.items() if k != "target"}
+    # Create result without target/target_binary first
+    examples_without_target = {k: v for k, v in examples.items() if k not in ["target", "target_binary"]}
     result = {**examples_without_target, **tokenized}
 
-    # Add target at the end if it exists
+    # Add target or target_binary at the end if it exists
     if "target" in examples:
         result["target"] = examples["target"]
+    elif "target_binary" in examples:
+        result["target_binary"] = examples["target_binary"]
 
     return result

@@ -116,7 +116,7 @@ def train_one_epoch(
     for i, data in enumerate(train_dataloader):
         input_ids = data["input_ids"].to(device)
         attention_mask = data["attention_mask"].to(device)
-        labels = data["target"].to(device)
+        labels = data["target_binary"].to(device)
         inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
         optimizer.zero_grad()
         outputs = model(inputs)
@@ -177,7 +177,7 @@ def evaluate_model(
         for data in dataloader:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
-            labels = data["target"].to(device)
+            labels = data["target_binary"].to(device)
             inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -206,8 +206,8 @@ def evaluate_model(
 
     if log_to_tensorboard:
         # Set up TensorBoard logging
-        tensorboard_run_name = "cbm"
-        log_dir = os.path.join("tensorboard_logs", "AIGCodeSet", tensorboard_run_name)
+        tensorboard_run_name = "cbm_codet"
+        log_dir = os.path.join("tensorboard_logs", "CoDeTM4", tensorboard_run_name)
         os.makedirs(log_dir, exist_ok=True)
         writer = SummaryWriter(log_dir=log_dir)
         
@@ -242,7 +242,7 @@ def train_model(
 ) -> torch.nn.Module:
     best_vloss = float("inf")
     patience_counter = 0
-    models_dir = "models/cbm"
+    models_dir = "models/cbm_codet"
     os.makedirs(models_dir, exist_ok=True)
     best_model_path = os.path.join(models_dir, "best_model.pth")
 
@@ -285,7 +285,7 @@ def train_model(
 
 def save_best_hyperparameters(params: dict, score: float):
     """Save the best hyperparameters to a JSON file."""
-    hyperparams_dir = "models/cbm/hyperparameters"
+    hyperparams_dir = "models/cbm_codet/hyperparameters"
     os.makedirs(hyperparams_dir, exist_ok=True)
     
     hyperparams_record = {
@@ -308,7 +308,7 @@ def save_best_hyperparameters(params: dict, score: float):
 
 def load_best_hyperparameters():
     """Load the best hyperparameters if they exist."""
-    best_params_file = "models/cbm/hyperparameters/best_hyperparameters.json"
+    best_params_file = "models/cbm_codet/hyperparameters/best_hyperparameters.json"
     if os.path.exists(best_params_file):
         with open(best_params_file, "r") as f:
             record = json.load(f)
@@ -331,14 +331,20 @@ def objective(trial, dataset, tokenizer, device, search_epochs):
     gradient_clip = trial.suggest_float("gradient_clip", 0.5, 2.0)
     scheduler_type = trial.suggest_categorical("scheduler", ["cosine", "step"])
     
-    train, val, test = dataset.get_dataset(split=True, test_size=0.2, val_size=0.1)
+    train, val, test = dataset.get_dataset(
+        split=['train', 'val', 'test'], 
+        columns=['code', 'target_binary'],
+        train_subset=1.0,
+        dynamic_split_sizing=True,
+        max_split_ratio=0.5
+    )
     
     tokenize = lambda x: tokenize_fn(tokenizer, x, max_length=512)
     train = train.map(tokenize, batched=True)
     val = val.map(tokenize, batched=True)
     
-    train.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
-    val.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
+    train.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
+    val.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
     
     base_model = RobertaModel.from_pretrained('microsoft/codebert-base')
     model = CBMClassifier(
@@ -383,7 +389,7 @@ def objective(trial, dataset, tokenizer, device, search_epochs):
         for data in train_dataloader:
             input_ids = data["input_ids"].to(device)
             attention_mask = data["attention_mask"].to(device)
-            labels = data["target"].to(device)
+            labels = data["target_binary"].to(device)
             inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
             
             optimizer.zero_grad()
@@ -476,7 +482,7 @@ def hyperparameter_search(args, dataset, tokenizer, device):
 
 def main():
     from transformers import RobertaTokenizer, RobertaModel
-    from data.dataset import AIGCodeSet
+    from data.dataset.codet_m4 import CoDeTM4
     from models.cbmclassifier import CBMClassifier
     from utils.utils import tokenize_fn
     
@@ -484,7 +490,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
 
-    dataset = AIGCodeSet(cache_dir=args.cache_dir)
+    dataset = CoDeTM4(cache_dir=args.cache_dir)
     tokenizer = RobertaTokenizer.from_pretrained(args.model_name)
 
     if args.hyperparameter_search:
@@ -513,18 +519,34 @@ def main():
 
     print(f"Training with epochs: {args.epochs}")
     
-    train, val, test = dataset.get_dataset(
-        split=True, test_size=args.test_size, val_size=args.val_size
-    )
+    if args.eval:
+        # For evaluation, use full test set without downsampling
+        train, val, test = dataset.get_dataset(
+            split=['train', 'val', 'test'], 
+            columns=['code', 'target_binary'],
+            train_subset=0.01,  # Keep small training set for consistency
+            dynamic_split_sizing=False,  # Don't limit test set size
+            max_split_ratio=0.5
+        )
+        logger.info(f"Evaluation mode: Using full test set with {len(test)} samples")
+    else:
+        # For training, use smaller subsets for faster training
+        train, val, test = dataset.get_dataset(
+            split=['train', 'val', 'test'], 
+            columns=['code', 'target_binary'],
+            train_subset=.1,
+            dynamic_split_sizing=True,
+            max_split_ratio=0.5
+        )
 
     tokenize = lambda x: tokenize_fn(tokenizer, x, max_length=512)
     train = train.map(tokenize, batched=True)
     val = val.map(tokenize, batched=True)
     test = test.map(tokenize, batched=True)
 
-    train.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
-    val.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
-    test.set_format(type="torch", columns=["input_ids", "attention_mask", "target"])
+    train.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
+    val.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
+    test.set_format(type="torch", columns=["input_ids", "attention_mask", "target_binary"])
 
     base_model = RobertaModel.from_pretrained('microsoft/codebert-base')
     model = CBMClassifier(
@@ -558,7 +580,7 @@ def main():
         test, batch_size=args.batch_size, num_workers=6, pin_memory=True
     )
 
-    models_dir = "models/cbm"
+    models_dir = "models/cbm_codet"
     best_model_path = os.path.join(models_dir, "best_model.pth")
 
     if args.eval:
@@ -572,6 +594,14 @@ def main():
         model.load_state_dict(torch.load(best_model_path, map_location=device))
         logger.info("Model loaded successfully.")
     else:
+        # Load existing model if it exists before training
+        if os.path.exists(best_model_path):
+            logger.info("Loading existing model to continue training...")
+            model.load_state_dict(torch.load(best_model_path, map_location=device))
+            logger.info("Existing model loaded successfully.")
+        else:
+            logger.info("No existing model found. Starting training from scratch.")
+            
         model = train_model(
             args.epochs,
             train_dataloader,
@@ -580,6 +610,7 @@ def main():
             optimizer,
             criterion,
             scheduler,
+            device,
             device,
             args.patience,
             args.log_interval,
