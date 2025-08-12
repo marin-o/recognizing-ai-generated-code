@@ -493,11 +493,71 @@ def create_model_with_optuna_params(storage_url, study_name, model_name,
         else:
             raise e
 
-def load_dataset(cache_dir, train_subset=0.1, full_test_set=False, val_ratio=0.1, test_ratio=0.2):
-    """Load the CoDeTM4 dataset with configurable validation and test ratios"""
-    from data.dataset.codet_m4 import CoDeTM4
+def load_dataset(cache_dir, train_subset=0.1, full_test_set=False, val_ratio=0.1, test_ratio=0.2, 
+                 use_cleaned=False, cleaned_data_path=None):
+    """
+    Load the CoDeTM4 dataset with configurable validation and test ratios
     
-    dataset = CoDeTM4(cache_dir=cache_dir)
+    Args:
+        cache_dir: Directory to cache the original dataset
+        train_subset: Fraction of training data to use
+        full_test_set: Whether to use the full test set
+        val_ratio: Validation set ratio
+        test_ratio: Test set ratio
+        use_cleaned: Whether to use the cleaned dataset (duplicates removed)
+        cleaned_data_path: Path to cleaned dataset directory (auto-detected if None)
+    """
+    if use_cleaned:
+        # Try to import and use the cleaned dataset
+        try:
+            from data.dataset.codet_m4_cleaned import CoDeTM4Cleaned
+            
+            # Auto-detect cleaned data path if not provided
+            if cleaned_data_path is None:
+                # Look for the most recent cleaned dataset
+                import glob
+                possible_paths = glob.glob("data/codet_cleaned_*")
+                if possible_paths:
+                    cleaned_data_path = max(possible_paths)  # Get the most recent one
+                    logger.info(f"Auto-detected cleaned dataset: {cleaned_data_path}")
+                else:
+                    logger.warning("No cleaned dataset found, falling back to original dataset")
+                    use_cleaned = False
+            
+            if use_cleaned:
+                dataset = CoDeTM4Cleaned(cleaned_data_path=cleaned_data_path)
+                logger.info(f"Using cleaned dataset from: {cleaned_data_path}")
+                
+                # Get dataset info if available
+                try:
+                    info = dataset.get_info()
+                    if 'cleaning_metadata' in info:
+                        metadata = info['cleaning_metadata']
+                        logger.info(f"Cleaned dataset info:")
+                        logger.info(f"  Original sizes - Train: {metadata.get('original_sizes', {}).get('train', 'N/A')}, "
+                                  f"Val: {metadata.get('original_sizes', {}).get('val', 'N/A')}, "
+                                  f"Test: {metadata.get('original_sizes', {}).get('test', 'N/A')}")
+                        logger.info(f"  Cleaned sizes - Train: {metadata.get('cleaned_sizes', {}).get('train', 'N/A')}, "
+                                  f"Val: {metadata.get('cleaned_sizes', {}).get('val', 'N/A')}, "
+                                  f"Test: {metadata.get('cleaned_sizes', {}).get('test', 'N/A')}")
+                        logger.info(f"  Total samples removed: {sum(metadata.get('removed_counts', {}).values())}")
+                except Exception as e:
+                    logger.debug(f"Could not load cleaning metadata: {e}")
+                    
+        except ImportError as e:
+            logger.warning(f"Could not import cleaned dataset class: {e}")
+            logger.info("Falling back to original dataset")
+            use_cleaned = False
+        except Exception as e:
+            logger.warning(f"Error loading cleaned dataset: {e}")
+            logger.info("Falling back to original dataset")
+            use_cleaned = False
+    
+    # Use original dataset if not using cleaned or if cleaned failed
+    if not use_cleaned:
+        from data.dataset.codet_m4 import CoDeTM4
+        dataset = CoDeTM4(cache_dir=cache_dir)
+        logger.info(f"Using original dataset from cache: {cache_dir}")
     
     if full_test_set:
         # For evaluation, use full test set without downsampling
@@ -523,10 +583,56 @@ def load_dataset(cache_dir, train_subset=0.1, full_test_set=False, val_ratio=0.1
             test_ratio=test_ratio
         )
     
-    logger.info(f"Dataset loaded - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
+    dataset_type = "cleaned" if use_cleaned else "original"
+    logger.info(f"Dataset loaded ({dataset_type}) - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
     logger.info(f"Val ratio: {val_ratio:.1%}, Test ratio: {test_ratio:.1%}")
     
     return train, val, test
+
+def get_available_cleaned_datasets():
+    """Get list of available cleaned datasets"""
+    import glob
+    import os
+    
+    possible_paths = glob.glob("data/codet_cleaned_*")
+    datasets_info = []
+    
+    for path in possible_paths:
+        if os.path.isdir(path):
+            info = {"path": path, "name": os.path.basename(path)}
+            
+            # Try to get metadata
+            metadata_path = os.path.join(path, 'cleaning_metadata.json')
+            if os.path.exists(metadata_path):
+                try:
+                    import json
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    info['metadata'] = metadata
+                    info['timestamp'] = metadata.get('cleaning_timestamp', 'Unknown')
+                    info['total_removed'] = sum(metadata.get('removed_counts', {}).values())
+                except Exception as e:
+                    logger.debug(f"Could not load metadata for {path}: {e}")
+            
+            datasets_info.append(info)
+    
+    # Sort by timestamp (most recent first)
+    datasets_info.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    return datasets_info
+
+def use_cleaned_dataset_by_default():
+    """
+    Convenience function to check if cleaned datasets are available and should be used by default.
+    Returns the path to the most recent cleaned dataset, or None if none available.
+    """
+    available = get_available_cleaned_datasets()
+    if available:
+        most_recent = available[0]
+        logger.info(f"Most recent cleaned dataset available: {most_recent['name']}")
+        if 'total_removed' in most_recent:
+            logger.info(f"  Removed {most_recent['total_removed']} duplicate samples")
+        return most_recent['path']
+    return None
 
 def tokenize_datasets(train: Dataset, val: Dataset, test: Dataset, tokenizer, max_length):
     """Tokenize train, validation, and test datasets"""

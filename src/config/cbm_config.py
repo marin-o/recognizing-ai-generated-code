@@ -353,6 +353,17 @@ Command-specific help:
         default=512,
         help="Maximum sequence length for tokenization"
     )
+    data_group.add_argument(
+        "--use-cleaned",
+        action="store_true",
+        help="Use cleaned (deduplicated) version of the dataset"
+    )
+    data_group.add_argument(
+        "--cleaned-data-path",
+        type=str,
+        default=None,
+        help="Path to cleaned dataset directory (if different from default)"
+    )
     
     # System parameters
     system_group = parser.add_argument_group("System Parameters")

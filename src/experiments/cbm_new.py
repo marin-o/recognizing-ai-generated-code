@@ -65,7 +65,9 @@ if __name__ == "__main__":
             train_subset=args.train_subset,
             full_test_set=args.full_test_set,
             val_ratio=args.val_ratio,
-            test_ratio=args.test_ratio
+            test_ratio=args.test_ratio,
+            use_cleaned=args.use_cleaned,
+            cleaned_data_path=args.cleaned_data_path
         )
         
         # Tokenize
@@ -144,7 +146,9 @@ if __name__ == "__main__":
                     train_subset=args.train_subset,
                     full_test_set=False,
                     val_ratio=args.val_ratio,
-                    test_ratio=args.test_ratio
+                    test_ratio=args.test_ratio,
+                    use_cleaned=args.use_cleaned,
+                    cleaned_data_path=args.cleaned_data_path
                 )
                 
                 trial_train, trial_val, _ = tokenize_datasets(
@@ -288,7 +292,9 @@ if __name__ == "__main__":
                 train_subset=args.train_subset,
                 full_test_set=False,
                 val_ratio=args.val_ratio,
-                test_ratio=args.test_ratio
+                test_ratio=args.test_ratio,
+                use_cleaned=args.use_cleaned,
+                cleaned_data_path=args.cleaned_data_path
             )
             
             # Tokenize
@@ -391,7 +397,9 @@ if __name__ == "__main__":
                 train_subset=args.train_subset,
                 full_test_set=False,
                 val_ratio=args.val_ratio,
-                test_ratio=args.test_ratio
+                test_ratio=args.test_ratio,
+                use_cleaned=args.use_cleaned,
+                cleaned_data_path=args.cleaned_data_path
             )
             
             # Tokenize
