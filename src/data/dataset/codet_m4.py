@@ -61,7 +61,7 @@ class CoDeTM4:
             target_binary = 0 if example["target"] == "human" else 1
             return {"target_binary": target_binary}
         
-        dataset = dataset.map(map_target_binary)
+        dataset = dataset.map(map_target_binary, num_proc=8)
         dataset = dataset.cast_column("target_binary", ClassLabel(names=["human", "ai"]))
         return dataset
 
@@ -171,7 +171,9 @@ class CoDeTM4:
         columns: Union[str, List[str]] = 'all', 
         train_subset: float = 1.0,
         dynamic_split_sizing: bool = True,
-        max_split_ratio: float = 0.2
+        max_split_ratio: float = 0.2,
+        val_ratio: float = None,
+        test_ratio: float = None
     ) -> Union[Dataset, Tuple[Dataset, ...]]:
         """
         Load and process the CoDet-M4 dataset.
@@ -182,6 +184,11 @@ class CoDeTM4:
             train_subset (float): Fraction of training data to load (0.0 to 1.0).
             dynamic_split_sizing (bool): Whether to dynamically limit val/test sizes based on train size.
             max_split_ratio (float): Maximum ratio of val/test size to train size when dynamic_split_sizing=True.
+                                   Used only if val_ratio/test_ratio are not specified (backward compatibility).
+            val_ratio (float, optional): Specific ratio for validation set size relative to total dataset.
+                                       If specified, overrides max_split_ratio for validation set.
+            test_ratio (float, optional): Specific ratio for test set size relative to total dataset.
+                                        If specified, overrides max_split_ratio for test set.
 
         Returns:
             Union[Dataset, Tuple[Dataset, ...]]: Single dataset if split is string, tuple of datasets if split is list.
@@ -236,17 +243,22 @@ class CoDeTM4:
             
             # First pass: get train size if train is requested
             if 'train' in splits_to_load and dynamic_split_sizing:
-                train_ds = ds.filter(lambda x: x['split'] == 'train')
+                train_ds = ds.filter(lambda x: x['split'] == 'train', num_proc=8)
                 if train_subset < 1.0:
                     train_ds = self._get_train_subset(train_ds, train_subset)
                 train_size = len(train_ds)
-                max_other_split_size = int(train_size * max_split_ratio)
-                logger.info(f"Train size: {train_size}, max val/test size: {max_other_split_size}")
+                
+                # For legacy behavior: limit val/test relative to train size
+                if val_ratio is None and test_ratio is None:
+                    max_other_split_size = int(train_size * max_split_ratio)
+                    logger.info(f"Train size: {train_size}, max val/test size: {max_other_split_size}")
+                else:
+                    logger.info(f"Train size: {train_size}")
             
             # Second pass: process all splits
             for split_name in splits_to_load:
                 # Filter for this specific split
-                split_ds = ds.filter(lambda x: x['split'] == split_name)
+                split_ds = ds.filter(lambda x: x['split'] == split_name, num_proc=8)
                 
                 # Apply train subset if this is training data
                 if split_name == 'train' and train_subset < 1.0:
@@ -255,7 +267,23 @@ class CoDeTM4:
                 # Apply dynamic sizing for val/test splits
                 elif split_name in ['val', 'test'] and dynamic_split_sizing and train_size is not None:
                     original_size = len(split_ds)
-                    split_ds = self._limit_split_size(split_ds, max_other_split_size)
+                    
+                    # Use new ratio-based sizing if available
+                    if split_name == 'val' and val_ratio is not None:
+                        # Calculate target size as ratio of the original validation set size
+                        target_size = int(original_size * val_ratio)
+                        logger.info(f"Target validation size: {target_size} ({val_ratio:.1%} of available validation data)")
+                        split_ds = self._limit_split_size(split_ds, target_size)
+                    elif split_name == 'test' and test_ratio is not None:
+                        # Calculate target size as ratio of the original test set size
+                        target_size = int(original_size * test_ratio)
+                        logger.info(f"Target test size: {target_size} ({test_ratio:.1%} of available test data)")
+                        split_ds = self._limit_split_size(split_ds, target_size)
+                    else:
+                        # Fallback to legacy behavior
+                        max_other_split_size = int(train_size * max_split_ratio)
+                        split_ds = self._limit_split_size(split_ds, max_other_split_size)
+                    
                     if len(split_ds) < original_size:
                         logger.info(f"Limited {split_name} from {original_size} to {len(split_ds)} samples")
                 
@@ -269,7 +297,7 @@ class CoDeTM4:
             # Single split or 'all' - return single dataset
             # Filter by split column if not loading all splits
             if isinstance(split, str) and split != 'all':
-                ds = ds.filter(lambda x: x['split'] in splits_to_load)
+                ds = ds.filter(lambda x: x['split'] in splits_to_load, num_proc=8)
 
             # Apply train subset if this includes training data
             if 'train' in splits_to_load and train_subset < 1.0:
@@ -281,19 +309,39 @@ class CoDeTM4:
             # Dynamic split sizing for validation and test splits
             if dynamic_split_sizing and 'train' in splits_to_load:
                 train_size = len(ds)
-                max_val_size = int(train_size * max_split_ratio)
-                max_test_size = int(train_size * max_split_ratio)
                 
                 # Limit validation and test splits if they exceed the maximum size
                 if 'val' in splits_to_load:
-                    val_split = ds.filter(lambda x: x['split'] == 'val')
+                    val_split = ds.filter(lambda x: x['split'] == 'val', num_proc=8)
+                    original_val_size = len(val_split)
+                    
+                    # Calculate target size using ratio if provided, otherwise use legacy logic
+                    if val_ratio is not None:
+                        max_val_size = int(original_val_size * val_ratio)
+                        logger.info(f"Target validation size: {max_val_size} ({val_ratio:.1%} of available validation data)")
+                    else:
+                        max_val_size = int(train_size * max_split_ratio)
+                    
                     val_split = self._limit_split_size(val_split, max_val_size)
-                    ds = ds.filter(lambda x: x['split'] != 'val').concatenate(val_split)
+                    if len(val_split) < original_val_size:
+                        logger.info(f"Limited validation from {original_val_size} to {len(val_split)} samples")
+                    ds = ds.filter(lambda x: x['split'] != 'val', num_proc=8).concatenate(val_split)
                 
                 if 'test' in splits_to_load:
-                    test_split = ds.filter(lambda x: x['split'] == 'test')
+                    test_split = ds.filter(lambda x: x['split'] == 'test', num_proc=8)
+                    original_test_size = len(test_split)
+                    
+                    # Calculate target size using ratio if provided, otherwise use legacy logic
+                    if test_ratio is not None:
+                        max_test_size = int(original_test_size * test_ratio)
+                        logger.info(f"Target test size: {max_test_size} ({test_ratio:.1%} of available test data)")
+                    else:
+                        max_test_size = int(train_size * max_split_ratio)
+                    
                     test_split = self._limit_split_size(test_split, max_test_size)
-                    ds = ds.filter(lambda x: x['split'] != 'test').concatenate(test_split)
+                    if len(test_split) < original_test_size:
+                        logger.info(f"Limited test from {original_test_size} to {len(test_split)} samples")
+                    ds = ds.filter(lambda x: x['split'] != 'test', num_proc=8).concatenate(test_split)
 
             return ds
 
@@ -327,6 +375,19 @@ if __name__ == "__main__":
     logger.info(f"Train dataset size: {len(train)}")
     logger.info(f"Val dataset size: {len(val)}")
     logger.info(f"Test dataset size: {len(test)}")
+    
+    # Load multiple splits with specific ratios (NEW FUNCTIONALITY)
+    logger.info("Loading train, val, and test splits with specific ratios...")
+    train2, val2, test2 = dataset_loader.get_dataset(
+        split=['train', 'val', 'test'], 
+        train_subset=0.05,  # 5% of train data
+        dynamic_split_sizing=True,
+        val_ratio=0.15,  # 15% of total dataset for validation
+        test_ratio=0.25  # 25% of total dataset for test
+    )
+    logger.info(f"Train dataset size: {len(train2)}")
+    logger.info(f"Val dataset size: {len(val2)} (15% of total)")
+    logger.info(f"Test dataset size: {len(test2)} (25% of total)")
     
     # Load specific columns
     logger.info("Loading specific columns...")

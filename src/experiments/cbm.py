@@ -611,7 +611,6 @@ def main():
             criterion,
             scheduler,
             device,
-            device,
             args.patience,
             args.log_interval,
             args.gradient_clip,
