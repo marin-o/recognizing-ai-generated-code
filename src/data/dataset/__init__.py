@@ -3,6 +3,7 @@ from .aigcodeset_cst import AIGCodeSet_WithCSTFeatures
 from .aigcodeset_levenshtein import AIGCodeSet_Levenshtein
 from .codet_m4 import CoDeTM4
 from .graph_codet import GraphCoDeTM4
+from .graph_aigcodeset import GraphAIGCodeSet
 
 __all__ = [
     'AIGCodeSet',
@@ -10,4 +11,5 @@ __all__ = [
     'AIGCodeSet_Levenshtein',
     'CoDeTM4',
     'GraphCoDeTM4',
+    'GraphAIGCodeSet',
 ]

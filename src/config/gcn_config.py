@@ -164,8 +164,11 @@ def parse_args():
         formatter_class=CustomHelpFormatter,
         epilog="""
 Examples:
-  Basic training with default parameters:
+  Basic training with default parameters (CoDeTM4):
     python gcn.py --train --model-name my_model
+
+  Training with AIGCodeSet dataset:
+    python gcn.py --train --model-name my_model --dataset aigcodeset
 
   Training with custom learning rate and epochs:
     python gcn.py --train --model-name my_model --learning-rate 0.01 --epochs 100
@@ -178,6 +181,12 @@ Examples:
 
   Hyperparameter optimization with 100 trials:
     python gcn.py --optimize --model-name my_model --n-trials 100
+
+  Evaluate a trained model on test set:
+    python gcn.py --eval --model-name my_model
+
+  Training on AIGCodeSet with custom data directory:
+    python gcn.py --train --model-name aig_model --dataset aigcodeset --data-dir data/aigcodeset_graphs
 
   Evaluate a trained model on test set:
     python gcn.py --eval --model-name my_model
@@ -292,6 +301,13 @@ Command-specific help:
         type=str,
         help="The suffix in the data file's filename (eg with 'comments' passed -> train_graphs_comments.pt)"
     )
+    data_group.add_argument(
+        "--dataset",
+        type=str,
+        choices=["codet", "aigcodeset"],
+        default="codet",
+        help="Dataset to use: 'codet' for CoDeTM4 or 'aigcodeset' for AIGCodeSet"
+    )
     
     # System parameters
     system_group = parser.add_argument_group("System Parameters")
@@ -328,6 +344,10 @@ Command-specific help:
     # Set defaults and validate
     if args.study_name is None:
         args.study_name = args.model_name
+    
+    # Set default data directory based on dataset choice if not explicitly provided
+    if args.data_dir == "data/codet_graphs" and args.dataset == "aigcodeset":
+        args.data_dir = "data/aigcodeset_graphs"
     
     # Validate mode-specific arguments
     if args.use_best_params and not args.train:

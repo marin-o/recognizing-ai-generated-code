@@ -10,6 +10,7 @@ if __name__ == "__main__":
     args = parse_args()
     MODEL_NAME = args.model_name
     SUFFIX = args.data_suffix
+    DATASET = args.dataset
     import optuna
     from optuna.trial import TrialState
     import torch
@@ -37,6 +38,9 @@ if __name__ == "__main__":
 
     set_seed(args.seed)
     
+    print(f"Using dataset: {DATASET}")
+    print(f"Data directory: {args.data_dir}")
+    
     # Initialize tensorboard writer if not disabled
     writer = None
     if not args.disable_tensorboard:
@@ -55,6 +59,7 @@ if __name__ == "__main__":
             shuffle=False,
             batch_size=args.batch_size,
             suffix=SUFFIX,
+            dataset=DATASET,
         )
         
         # Load model directly from checkpoint (includes architecture info)
@@ -105,6 +110,7 @@ if __name__ == "__main__":
             data_dir=args.data_dir,
             batch_size=args.batch_size,
             suffix=SUFFIX,
+            dataset=DATASET,
         )
 
         if args.optimize:
@@ -206,6 +212,7 @@ if __name__ == "__main__":
                 shuffle=False,
                 batch_size=args.batch_size,
                 suffix=SUFFIX,
+                dataset=DATASET,
             )
 
             epoch, best_vloss, best_vacc = load_model(
@@ -289,6 +296,7 @@ if __name__ == "__main__":
                 shuffle=False,
                 batch_size=args.batch_size,
                 suffix=SUFFIX,
+                dataset=DATASET,
             )
 
             epoch, best_vloss, best_vacc = load_model(

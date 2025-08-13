@@ -392,15 +392,22 @@ def train(model, optimizer, criterion, train_dataloader, val_dataloader=None, sc
 
         epoch_pbar.set_postfix(postfix)
 
-def load_single_data(data_dir='data/codet_graphs', split='train', shuffle=True, batch_size=128, suffix=''):
+def load_single_data(data_dir='data/codet_graphs', split='train', shuffle=True, batch_size=128, suffix='', dataset='codet'):
     """Load a single data split and return a DataLoader."""
-    data = GraphCoDeTM4(data_dir, split=split, suffix=suffix)
+    if dataset == 'codet':
+        data = GraphCoDeTM4(data_dir, split=split, suffix=suffix)
+    elif dataset == 'aigcodeset':
+        from data.dataset import GraphAIGCodeSet
+        data = GraphAIGCodeSet(data_dir, split=split, suffix=suffix)
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset}. Choose 'codet' or 'aigcodeset'")
+    
     loader = DataLoader(data, batch_size=batch_size, shuffle=shuffle)
     loader.num_node_features = data.num_node_features
     del data
     return loader
 
-def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128, suffix=''):
+def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128, suffix='', dataset='codet'):
     """Load multiple data splits and return a list of DataLoaders."""
     if shuffles is None:
         shuffles = [True] * len(splits)
@@ -414,20 +421,21 @@ def load_multiple_data(data_dir='data/codet_graphs', splits=['train', 'val'], sh
     
     loaders = []
     for split, shuffle in zip(splits, shuffles):
-        loader = load_single_data(data_dir, split, shuffle, batch_size, suffix)
+        loader = load_single_data(data_dir, split, shuffle, batch_size, suffix, dataset)
         loaders.append(loader)
     
     return loaders
 
-def load_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128):
+def load_data(data_dir='data/codet_graphs', splits=['train', 'val'], shuffles=None, batch_size=128, dataset='codet'):
     """
     Convenience function for backward compatibility.
     Consider using load_single_data() or load_multiple_data() directly.
     """
     if isinstance(splits, str):
         shuffle = shuffles if isinstance(shuffles, bool) else True
-        return load_single_data(data_dir, splits, shuffle, batch_size)
+        return load_single_data(data_dir, splits, shuffle, batch_size, '', dataset)
     else:
+        return load_multiple_data(data_dir, splits, shuffles, batch_size, '', dataset)
         return load_multiple_data(data_dir, splits, shuffles, batch_size)
 
 def get_metrics():
