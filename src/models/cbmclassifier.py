@@ -67,8 +67,8 @@ class CBMClassifier(nn.Module):
 
         emb_cnn = emb.transpose(1, 2)  # (batch, embed_dim, seq_len)
         conv1_outputs = [self.relu(conv(emb_cnn)) for conv in self.convs1]
-        pooled1 = [self.pool(c, kernel_size=c.size(2)).squeeze(2) for c in conv1_outputs]
-        x_1 = pooled1[0]
+        pooled = [self.pool(c, kernel_size=c.size(2)).squeeze(2) for c in conv1_outputs]
+        x_1 = pooled[0]
         c2_2 = self.relu(self.conv21(conv1_outputs[1]))
         x_2 = self.pool(c2_2, kernel_size=c2_2.size(2)).squeeze(2)
 

@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import numpy as np
 import pandas as pd
 
-from data.dataset import AIGCodeSet_WithCSTFeatures
+from data.dataset.codet_m4_cst import CoDeTM4_WithCSTFeatures
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
@@ -55,12 +55,10 @@ def main():
     args = parse_args()
 
     # Load and preprocess dataset
-    dataset = AIGCodeSet_WithCSTFeatures(
+    dataset = CoDeTM4_WithCSTFeatures(
         cache_dir=args.cache_dir, features_as_tensor=False
     )
-    train, val, test = dataset.get_dataset(
-        split=True, test_size=args.test_size, val_size=args.val_size
-    )
+    train, val, test = dataset.get_dataset(['train', 'val', 'test'])
     logger.info(f"Train columns: {train.column_names}")
     logger.info(f"Train dataset size: {len(train)}, Val: {len(val)}, Test: {len(test)}")
 
@@ -99,12 +97,6 @@ def main():
     train_labels = np.array(train["target"])
     val_labels = np.array(val["target"])
     test_labels = np.array(test["target"])
-
-    # Check class distribution
-    class_counts = np.bincount(train_labels)
-    logger.info(
-        f"Class distribution (train): Human={class_counts[0]}, AI={class_counts[1]}"
-    )
 
     # Initialize model
     model = RandomForestClassifier(
