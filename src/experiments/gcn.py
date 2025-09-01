@@ -18,7 +18,7 @@ if __name__ == "__main__":
     from data.dataset import GraphCoDeTM4
     from torch_geometric.loader import DataLoader
     from torchmetrics import Accuracy, Precision, Recall, Specificity, AUROC
-    from utils.gnn_utils import (
+    from utils.gcn_utils import (
         save_model,
         load_model,
         get_metrics,
