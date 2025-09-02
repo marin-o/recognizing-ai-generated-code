@@ -25,6 +25,7 @@ Usage:
 Key Options:
   --model-name NAME         Name of the model (default: gcn_baseline)
   --use-best-params        Use best hyperparameters from Optuna study
+  --source-model-name NAME  Source model name for loading best params (use with --use-best-params)
   --epochs N               Number of training epochs (default: 50)
   --learning-rate RATE     Learning rate for optimizer (default: 0.001)
   --batch-size SIZE        Batch size for training (default: 128)
@@ -41,11 +42,15 @@ Examples:
   # Training using optimized hyperparameters from previous optimization
   python gcn.py --train --model-name my_model --use-best-params
 
+  # Training using parameters from a different model's optimization
+  python gcn.py --train --model-name new_model --use-best-params --source-model-name baseline_v2
+
   # Training with specific device and larger batch size
   python gcn.py --train --model-name my_model --device cuda --batch-size 256
 
 Note: If --use-best-params is specified, the script will load the best hyperparameters
-from the Optuna study with the same name as the model.
+from the Optuna study. If --source-model-name is also specified, it will load parameters
+from that study instead of the current model's study.
         """,
         
         'resume': """
@@ -176,6 +181,9 @@ Examples:
   Training using best hyperparameters from optimization:
     python gcn.py --train --model-name my_model --use-best-params
 
+  Training using parameters from another model's optimization:
+    python gcn.py --train --model-name new_model --use-best-params --source-model-name baseline_v2
+
   Resume training from a checkpoint:
     python gcn.py --resume --model-name my_model --epochs 100
 
@@ -244,6 +252,12 @@ Command-specific help:
         "--use-best-params",
         action="store_true",
         help="Use best hyperparameters from Optuna study (only for --train mode)"
+    )
+    model_group.add_argument(
+        "--source-model-name",
+        type=str,
+        default=None,
+        help="Source model name for loading best parameters (use with --use-best-params). If not specified, uses --model-name"
     )
     
     # Training parameters
@@ -353,8 +367,14 @@ Command-specific help:
     if args.use_best_params and not args.train:
         parser.error("--use-best-params can only be used with --train mode")
     
+    if args.source_model_name and not args.use_best_params:
+        parser.error("--source-model-name can only be used with --use-best-params")
+    
     if args.resume and args.use_best_params:
         parser.error("--use-best-params cannot be used with --resume mode (parameters are loaded from checkpoint)")
+    
+    if args.resume and args.source_model_name:
+        parser.error("--source-model-name cannot be used with --resume mode")
     
     if args.optimize and args.epochs < 10:
         print("Warning: Using less than 10 epochs for optimization may not give good results")

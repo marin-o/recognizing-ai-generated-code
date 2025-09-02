@@ -92,27 +92,31 @@ def load_model(model, optimizer, save_path='models/gnn', model_name=None, schedu
     
     return checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
 
-def create_model_with_optuna_params(num_node_features, storage_url, study_name, model_name, use_default_on_failure=True):
+def create_model_with_optuna_params(num_node_features, storage_url, study_name, model_name, use_default_on_failure=True, source_study_name=None):
     """
     Create a GCN model, optimizer, and scheduler using best hyperparameters from Optuna study.
     
     Args:
         num_node_features: Number of input node features
         storage_url: Optuna storage URL
-        study_name: Name of the Optuna study
+        study_name: Name of the Optuna study (used as fallback if source_study_name not provided)
         model_name: Name for the model (used for model.name attribute)
         use_default_on_failure: If True, create model with default params if Optuna loading fails
+        source_study_name: Optional source study name to load parameters from (overrides study_name)
         
     Returns:
         tuple: (model, optimizer, scheduler, success_flag)
         success_flag: True if loaded from Optuna, False if using defaults
         scheduler: None if not used in optimization or if loading failed
     """
+    # Use source study name if provided, otherwise use the default study name
+    actual_study_name = source_study_name if source_study_name is not None else study_name
+    
     try:
-        study = optuna.load_study(storage=storage_url, study_name=study_name)
+        study = optuna.load_study(storage=storage_url, study_name=actual_study_name)
         best_params = study.best_trial.params
         
-        print("Loading model with best hyperparameters from Optuna:")
+        print(f"Loading model with best hyperparameters from Optuna study '{actual_study_name}':")
         for key, value in best_params.items():
             print(f"  {key}: {value}")
         

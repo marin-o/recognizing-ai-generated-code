@@ -161,12 +161,15 @@ if __name__ == "__main__":
                     storage_url=args.storage_url,
                     study_name=args.study_name,
                     model_name=MODEL_NAME,
-                    use_default_on_failure=False  # Don't fallback to defaults in training mode
+                    use_default_on_failure=False,  # Don't fallback to defaults in training mode
+                    source_study_name=args.source_model_name  # Use source model name if provided
                 )
                 
                 if not optuna_success:
-                    print("Failed to load Optuna parameters for training mode")
-                    print(f"Make sure the study '{args.study_name}' exists in {args.storage_url}")
+                    source_info = f" from source model '{args.source_model_name}'" if args.source_model_name else ""
+                    study_info = args.source_model_name if args.source_model_name else args.study_name
+                    print(f"Failed to load Optuna parameters for training mode{source_info}")
+                    print(f"Make sure the study '{study_info}' exists in {args.storage_url}")
                     sys.exit(1)
                     
                 # Don't create a default scheduler if Optuna didn't use one
