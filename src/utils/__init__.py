@@ -1,5 +1,5 @@
 # Graph utils module
-from .gnn_utils import (
+from .gcn_utils import (
     save_model,
     load_model,
     set_seed,
