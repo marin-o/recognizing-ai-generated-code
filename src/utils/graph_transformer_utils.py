@@ -398,7 +398,7 @@ def load_single_data(data_dir='data/codet_graphs', split='train', shuffle=True, 
         raise ValueError(f"Unsupported dataset: {dataset}. Choose 'codet' or 'aigcodeset'")
     
     loader = DataLoader(data, batch_size=batch_size, shuffle=shuffle)
-    loader.dataset.num_node_features = data.num_node_features
+    loader.num_node_features = data.num_node_features
     del data
     return loader
 
@@ -464,7 +464,7 @@ def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
 
         # Create model
         model = GraphTransformer(
-            num_node_features=train_dataloader.dataset.num_node_features,
+            num_node_features=train_dataloader.num_node_features,
             embedding_dim=embedding_dim,
             hidden_dim=hidden_dim,
             num_heads=num_heads,

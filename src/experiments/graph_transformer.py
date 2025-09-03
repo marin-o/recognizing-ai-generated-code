@@ -156,9 +156,9 @@ if __name__ == "__main__":
             print("Training model...")
             if args.use_best_params:
                 # Create model with best hyperparameters from Optuna
-                print(train_loader.dataset.num_node_features)
+                print(train_loader.num_node_features)
                 model, optimizer, scheduler, optuna_success = create_model_with_optuna_params(
-                    num_node_features=train_loader.dataset.num_node_features,
+                    num_node_features=train_loader.num_node_features,
                     storage_url=args.storage_url,
                     study_name=args.study_name,
                     model_name=MODEL_NAME,
@@ -180,7 +180,7 @@ if __name__ == "__main__":
             else:
                 # Use default model architecture
                 model = GraphTransformer(
-                    num_node_features=train_loader.dataset.num_node_features,
+                    num_node_features=train_loader.num_node_features,
                     embedding_dim=args.embedding_dim,
                     hidden_dim=args.hidden_dim,
                     num_heads=args.num_heads,
