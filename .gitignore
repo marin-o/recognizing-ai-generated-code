@@ -5,6 +5,7 @@
 /mlruns/
 /tensorboard_logs/
 /runs/
+/data_stats/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
