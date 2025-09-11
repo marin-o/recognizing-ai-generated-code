@@ -15,7 +15,8 @@ from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB, GaussianNB
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import accuracy_score, classification_report, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, classification_report, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import GridSearchCV
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -171,21 +172,21 @@ def extract_features(train_dataset, val_dataset, test_dataset, feature_type="com
 def get_model_and_params(model_name, feature_type="combined"):
     """Get model instance and hyperparameter grid for tuning."""
     if model_name == "rf":
-        model = RandomForestClassifier(random_state=42, n_jobs=-1)
+        model = RandomForestClassifier(random_state=872002, n_jobs=-1)
         param_grid = {
             "n_estimators": [50, 100],
             "max_depth": [10, 20, None],
             "min_samples_split": [2, 5],
         }
     elif model_name == "svm":
-        model = SVC(random_state=42, probability=True)
+        model = SVC(random_state=872002, probability=True)
         param_grid = {
             "C": [0.1, 1, 10],
             "kernel": ["linear", "rbf"],
             "gamma": ["scale", "auto"],
         }
     elif model_name == "lr":
-        model = LogisticRegression(random_state=42, max_iter=1000)
+        model = LogisticRegression(random_state=872002, max_iter=1000)
         param_grid = {
             "C": [0.01, 0.1, 1, 10],
             "penalty": ["l1", "l2"],
@@ -238,23 +239,60 @@ def evaluate_model(model, X_train, X_val, X_test, y_train, y_val, y_test, model_
     val_predictions = model_instance.predict(X_val)
     test_predictions = model_instance.predict(X_test)
     
-    # Calculate metrics
+    # Get prediction probabilities for AUROC (if available)
+    try:
+        if hasattr(model_instance, "predict_proba"):
+            test_proba = model_instance.predict_proba(X_test)[:, 1]  # Probability of positive class
+            val_proba = model_instance.predict_proba(X_val)[:, 1]
+        elif hasattr(model_instance, "decision_function"):
+            test_proba = model_instance.decision_function(X_test)
+            val_proba = model_instance.decision_function(X_val)
+        else:
+            test_proba = None
+            val_proba = None
+    except:
+        test_proba = None
+        val_proba = None
+    
+    # Calculate metrics (binary classification, same as enhanced transformer)
     val_accuracy = accuracy_score(y_val, val_predictions)
     test_accuracy = accuracy_score(y_test, test_predictions)
-    val_f1 = f1_score(y_val, val_predictions, average='macro')
-    test_f1 = f1_score(y_test, test_predictions, average='macro')
-    test_precision = precision_score(y_test, test_predictions, average='macro')
-    test_recall = recall_score(y_test, test_predictions, average='macro')
     
-    # Log results
-    logger.info(f"{model_name.upper()} Results:")
-    logger.info(f"  Validation Accuracy: {val_accuracy:.4f}")
-    logger.info(f"  Test Accuracy: {test_accuracy:.4f}")
-    logger.info(f"  Test F1 (macro): {test_f1:.4f}")
-    logger.info(f"  Test Precision (macro): {test_precision:.4f}")
-    logger.info(f"  Test Recall (macro): {test_recall:.4f}")
+    # Use binary averaging to match enhanced transformer metrics
+    val_f1 = f1_score(y_val, val_predictions, average='binary')
+    test_f1 = f1_score(y_test, test_predictions, average='binary')
+    test_precision = precision_score(y_test, test_predictions, average='binary')
+    test_recall = recall_score(y_test, test_predictions, average='binary')
     
-    logger.info(f"Test Classification Report for {model_name.upper()}:")
+    # Calculate specificity from confusion matrix
+    tn, fp, fn, tp = confusion_matrix(y_test, test_predictions).ravel()
+    test_specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    
+    # Calculate AUROC
+    test_auroc = None
+    if test_proba is not None:
+        try:
+            test_auroc = roc_auc_score(y_test, test_proba)
+        except:
+            test_auroc = None
+    
+    # Log results (matching enhanced transformer format)
+    logger.info(f"\n{'='*50}")
+    logger.info(f"{model_name.upper()} EVALUATION RESULTS:")
+    logger.info(f"{'='*50}")
+    logger.info(f"Validation Accuracy: {val_accuracy:.6f}")
+    logger.info(f"Test Accuracy: {test_accuracy:.6f}")
+    logger.info(f"Test Precision: {test_precision:.6f}")
+    logger.info(f"Test Recall: {test_recall:.6f}")
+    logger.info(f"Test Specificity: {test_specificity:.6f}")
+    if test_auroc is not None:
+        logger.info(f"Test AUROC: {test_auroc:.6f}")
+    else:
+        logger.info(f"Test AUROC: N/A (model doesn't support probability prediction)")
+    logger.info(f"Test F1: {test_f1:.6f}")
+    logger.info(f"{'='*50}")
+    
+    logger.info(f"\nDetailed Classification Report for {model_name.upper()}:")
     logger.info(
         classification_report(
             y_test,
@@ -287,13 +325,16 @@ def evaluate_model(model, X_train, X_val, X_test, y_train, y_val, y_test, model_
             # For other types, convert to string
             writer.add_text(f"Hyperparameters/{param_name}", str(param_value))
     
-    # Log metrics
+    # Log metrics (matching enhanced transformer format)
     writer.add_scalar("Metrics/test_accuracy", test_accuracy)
     writer.add_scalar("Metrics/val_accuracy", val_accuracy)
-    writer.add_scalar("Metrics/test_f1_macro", test_f1)
-    writer.add_scalar("Metrics/val_f1_macro", val_f1)
-    writer.add_scalar("Metrics/test_precision_macro", test_precision)
-    writer.add_scalar("Metrics/test_recall_macro", test_recall)
+    writer.add_scalar("Metrics/test_f1", test_f1)  # Changed from f1_macro to f1
+    writer.add_scalar("Metrics/val_f1", val_f1)    # Changed from val_f1_macro to val_f1
+    writer.add_scalar("Metrics/test_precision", test_precision)  # Changed from precision_macro
+    writer.add_scalar("Metrics/test_recall", test_recall)        # Changed from recall_macro
+    writer.add_scalar("Metrics/test_specificity", test_specificity)  # New metric
+    if test_auroc is not None:
+        writer.add_scalar("Metrics/test_auroc", test_auroc)      # New metric
     
     # Save model
     model_path = os.path.join(model_log_dir, f"{model_name}_model.pkl")
@@ -309,6 +350,8 @@ def evaluate_model(model, X_train, X_val, X_test, y_train, y_val, y_test, model_
         'test_f1': test_f1,
         'test_precision': test_precision,
         'test_recall': test_recall,
+        'test_specificity': test_specificity,
+        'test_auroc': test_auroc,
     }
 
 
@@ -400,16 +443,21 @@ def main():
     logger.info("="*50)
     
     for model_name, result in results.items():
+        auroc_str = f"AUROC={result['test_auroc']:.4f}" if result['test_auroc'] is not None else "AUROC=N/A"
         logger.info(f"{model_name.upper()}: Accuracy={result['test_accuracy']:.4f}, "
-                   f"F1={result['test_f1']:.4f}, "
                    f"Precision={result['test_precision']:.4f}, "
-                   f"Recall={result['test_recall']:.4f}")
+                   f"Recall={result['test_recall']:.4f}, "
+                   f"Specificity={result['test_specificity']:.4f}, "
+                   f"{auroc_str}, "
+                   f"F1={result['test_f1']:.4f}")
     
     # Find best model
     if results:
         best_model_name = max(results.keys(), key=lambda k: results[k]['test_f1'])
+        best_auroc = results[best_model_name]['test_auroc']
+        auroc_info = f", AUROC: {best_auroc:.4f}" if best_auroc is not None else ""
         logger.info(f"\nBest model by F1-score: {best_model_name.upper()} "
-                   f"(F1: {results[best_model_name]['test_f1']:.4f})")
+                   f"(F1: {results[best_model_name]['test_f1']:.4f}{auroc_info})")
 
 
 if __name__ == "__main__":
