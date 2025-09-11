@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
-from torchmetrics import Accuracy, F1Score, Recall, Precision
+from torchmetrics import Accuracy, F1Score, Recall, Precision, Specificity, AUROC
 from transformers import RobertaTokenizer
 from tqdm import tqdm
 from data.dataset import CoDeTM4
@@ -22,8 +22,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-mlflow_run_name = "baseline_codet_full" 
-models_dir = "models/baseline_codet_full"
+mlflow_run_name = "baseline_codet_full_x" 
+models_dir = "models/baseline_codet_full_x"
 
 
 def parse_args():
@@ -158,20 +158,18 @@ def evaluate_model(
     """
     model.eval()
 
-    # Initialize metrics - assuming binary classification (num_classes=2)
-    num_classes = 2
-    accuracy = Accuracy(task="multiclass", num_classes=num_classes).to(device)
-    f1 = F1Score(task="multiclass", num_classes=num_classes, average="macro").to(device)
-    recall = Recall(task="multiclass", num_classes=num_classes, average="macro").to(
-        device
-    )
-    precision = Precision(
-        task="multiclass", num_classes=num_classes, average="macro"
-    ).to(device)
+    # Initialize metrics for binary classification (matching enhanced transformer)
+    accuracy = Accuracy(task="binary").to(device)
+    f1 = F1Score(task="binary").to(device)
+    recall = Recall(task="binary").to(device)
+    precision = Precision(task="binary").to(device)
+    specificity = Specificity(task="binary").to(device)
+    auroc = AUROC(task="binary").to(device)
 
     running_loss = 0.0
     all_predictions = []
     all_labels = []
+    all_probabilities = []  # For AUROC calculation
 
     with torch.no_grad():
         for data in dataloader:
@@ -181,20 +179,27 @@ def evaluate_model(
             outputs = model(input_ids, attention_mask)
             loss = criterion(outputs, labels)
             running_loss += loss.item()
+            
+            # Get predictions and probabilities
+            probabilities = torch.softmax(outputs, dim=1)
             _, predicted = torch.max(outputs, 1)
 
             all_predictions.append(predicted)
             all_labels.append(labels)
+            all_probabilities.append(probabilities[:, 1])  # Probability of positive class
 
-    # Concatenate all predictions and labels
+    # Concatenate all predictions, labels, and probabilities
     all_predictions = torch.cat(all_predictions)
     all_labels = torch.cat(all_labels)
+    all_probabilities = torch.cat(all_probabilities)
 
     # Calculate metrics
     acc = accuracy(all_predictions, all_labels)
     f1_score = f1(all_predictions, all_labels)
     recall_score = recall(all_predictions, all_labels)
     precision_score = precision(all_predictions, all_labels)
+    specificity_score = specificity(all_predictions, all_labels)
+    auroc_score = auroc(all_probabilities, all_labels)
     avg_loss = running_loss / len(dataloader) if len(dataloader) > 0 else 0
 
     test_metrics = {
@@ -202,6 +207,8 @@ def evaluate_model(
         "f1": f1_score.item(),
         "recall": recall_score.item(),
         "precision": precision_score.item(),
+        "specificity": specificity_score.item(),
+        "auroc": auroc_score.item(),
         "loss": avg_loss,
     }
 
@@ -210,11 +217,13 @@ def evaluate_model(
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=log_dir)
     
-    # Log metrics
+    # Log metrics (matching enhanced transformer format)
     writer.add_scalar("Metrics/test_accuracy", test_metrics["accuracy"])
-    writer.add_scalar("Metrics/test_f1_macro", test_metrics["f1"])
-    writer.add_scalar("Metrics/recall", test_metrics["recall"])
-    writer.add_scalar("Metrics/precision", test_metrics["precision"])
+    writer.add_scalar("Metrics/test_f1", test_metrics["f1"])
+    writer.add_scalar("Metrics/test_recall", test_metrics["recall"])
+    writer.add_scalar("Metrics/test_precision", test_metrics["precision"])
+    writer.add_scalar("Metrics/test_specificity", test_metrics["specificity"])
+    writer.add_scalar("Metrics/test_auroc", test_metrics["auroc"])
     writer.add_scalar("Metrics/test_loss", test_metrics["loss"])
 
     # Save model
@@ -376,13 +385,20 @@ def main():
             args.log_interval,
         )
 
-    # Evaluate model
+    # Evaluate model (matching enhanced transformer output format)
     test_metrics = evaluate_model(test_dataloader, model, criterion, device)
-    logger.info(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
-    logger.info(f"Test F1: {test_metrics['f1']:.4f}")
-    logger.info(f"Test Recall: {test_metrics['recall']:.4f}")
-    logger.info(f"Test Precision: {test_metrics['precision']:.4f}")
-    logger.info(f"Test Loss: {test_metrics['loss']:.4f}")
+    
+    logger.info("\n" + "="*50)
+    logger.info("BASELINE CODET EVALUATION RESULTS:")
+    logger.info("="*50)
+    logger.info(f"Test Loss: {test_metrics['loss']:.5f}")
+    logger.info(f"Test accuracy: {test_metrics['accuracy']:.6f}")
+    logger.info(f"Test precision: {test_metrics['precision']:.6f}")
+    logger.info(f"Test recall: {test_metrics['recall']:.6f}")
+    logger.info(f"Test specificity: {test_metrics['specificity']:.6f}")
+    logger.info(f"Test auroc: {test_metrics['auroc']:.6f}")
+    logger.info(f"Test f1: {test_metrics['f1']:.6f}")
+    logger.info("="*50)
 
 
 if __name__ == "__main__":
