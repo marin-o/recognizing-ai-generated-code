@@ -8,7 +8,7 @@ from torch_geometric.loader import DataLoader
 from models.GraphTransformer import GraphTransformer, GraphTransformerWithPositionalEncoding
 from data.dataset.graph_codet_enhanced import GraphCoDeTM4Enhanced
 from data.dataset.graph_aigcodeset import GraphAIGCodeSet
-from torchmetrics import Accuracy, Precision, Recall, Specificity, AUROC
+from torchmetrics import Accuracy, Precision, Recall, Specificity, AUROC, F1Score
 import optuna
 import random
 import numpy as np
@@ -37,6 +37,7 @@ def get_metrics():
         'recall': Recall(task='binary').to(DEVICE),
         'specificity': Specificity(task='binary').to(DEVICE),
         'auroc': AUROC(task='binary').to(DEVICE),
+        'f1': F1Score(task='binary').to(DEVICE),
     }
 
 def load_enhanced_data(data_dir: str, split: str, batch_size: int = 128, 
