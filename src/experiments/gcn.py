@@ -181,6 +181,7 @@ if __name__ == "__main__":
                 # Use default model architecture
                 model = GCN(
                     train_loader.dataset.num_node_features,
+                    use_two_layer_classifier=args.use_two_layer_classifier,
                 ).to(DEVICE)
 
                 optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)

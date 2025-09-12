@@ -242,6 +242,11 @@ Command-specific help:
         action="store_true",
         help="Use best hyperparameters from Optuna study (only for --train mode)"
     )
+    model_group.add_argument(
+        "--use-two-layer-classifier",
+        action="store_true",
+        help="Use two-layer classifier instead of single layer (default: False for backward compatibility)"
+    )
     
     # Training parameters
     train_group = parser.add_argument_group("Training Parameters")

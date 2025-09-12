@@ -29,7 +29,8 @@ def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models
         'hidden_dim_1': model.conv1.out_channels,
         'hidden_dim_2': model.conv2.out_channels,
         'heads': model.heads,
-        'dropout': model.dropout_rate
+        'dropout': model.dropout_rate,
+        'use_two_layer_classifier': model.use_two_layer_classifier
     }
     
     # Prepare checkpoint data
@@ -125,6 +126,7 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
             embedding_dim=best_params["embedding_dim"],
             heads=best_params["heads"],
             dropout=best_params["dropout"],
+            use_two_layer_classifier=best_params.get("use_two_layer_classifier", False),
         ).to(DEVICE)
         
         optimizer = torch.optim.Adam(model.parameters(), lr=best_params["lr"])
@@ -179,7 +181,8 @@ def create_model_from_checkpoint(checkpoint_path, model_name=None):
         hidden_dim_1=config['hidden_dim_1'],
         hidden_dim_2=config['hidden_dim_2'],
         heads=config['heads'],
-        dropout=config['dropout']
+        dropout=config['dropout'],
+        use_two_layer_classifier=config.get('use_two_layer_classifier', False)
     ).to(DEVICE)
     
     # Create optimizer (we don't save lr in config, so use a default)
@@ -416,6 +419,9 @@ def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
         dropout = trial.suggest_float("dropout", 0.1, 0.8)  # Dropout rate
         lr = trial.suggest_float('lr', low=0.0001, high=0.01, log=True)
         
+        # Classifier hyperparameters
+        use_two_layer_classifier = trial.suggest_categorical("use_two_layer_classifier", [True, False])
+        
         # Scheduler parameters
         use_scheduler = trial.suggest_categorical('use_scheduler', [True, False])
         scheduler_patience = None
@@ -429,6 +435,7 @@ def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
             embedding_dim=embedding_dim,
             heads=heads,
             dropout=dropout,
+            use_two_layer_classifier=use_two_layer_classifier,
         ).to(DEVICE)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
