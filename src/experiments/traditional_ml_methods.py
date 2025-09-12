@@ -174,9 +174,9 @@ def get_model_and_params(model_name, feature_type="combined"):
     if model_name == "rf":
         model = RandomForestClassifier(random_state=872002, n_jobs=-1)
         param_grid = {
-            "n_estimators": [50, 100],
-            "max_depth": [10, 20, None],
-            "min_samples_split": [2, 5],
+            "n_estimators": [10, 20, 30, 50],
+            "max_depth": [10, 20, 30, 40],
+            "min_samples_split": [2, 3, 5],
         }
     elif model_name == "svm":
         model = SVC(random_state=872002, probability=True)
