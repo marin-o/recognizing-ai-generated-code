@@ -162,7 +162,8 @@ if __name__ == "__main__":
                     study_name=args.study_name,
                     model_name=MODEL_NAME,
                     use_default_on_failure=False,  # Don't fallback to defaults in training mode
-                    source_study_name=args.source_model_name  # Use source model name if provided
+                    source_study_name=args.source_model_name,  # Use source model name if provided
+                    override_two_layer_classifier=True if args.force_two_layer_classifier else None
                 )
                 
                 if not optuna_success:

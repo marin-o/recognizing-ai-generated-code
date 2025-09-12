@@ -259,6 +259,11 @@ Command-specific help:
         default=None,
         help="Source model name for loading best parameters (use with --use-best-params). If not specified, uses --model-name"
     )
+    model_group.add_argument(
+        "--force-two-layer-classifier",
+        action="store_true",
+        help="Force use of two-layer classifier even when loading params from single-layer study"
+    )
     
     # Training parameters
     train_group = parser.add_argument_group("Training Parameters")

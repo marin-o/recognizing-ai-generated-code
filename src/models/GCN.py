@@ -6,7 +6,7 @@ from torch_geometric.data import Data
 
 
 class GCN(nn.Module):
-    def __init__(self, num_node_features, embedding_dim=256, hidden_dim_1=128, hidden_dim_2=128, sage=False):
+    def __init__(self, num_node_features, embedding_dim=256, hidden_dim_1=128, hidden_dim_2=128, sage=False, use_two_layer_classifier=False):
         super().__init__()
         self.emb = nn.Embedding(num_embeddings=num_node_features, embedding_dim=embedding_dim)
         if sage:
@@ -18,7 +18,21 @@ class GCN(nn.Module):
 
         # self.attention_pool = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim, 1))
         self.pooling = global_mean_pool
-        self.classifier = nn.Linear(hidden_dim_2, 1)
+        
+        # Classifier layers - single or double based on use_two_layer_classifier
+        self.use_two_layer_classifier = use_two_layer_classifier
+        if use_two_layer_classifier:
+            # First classifier layer: input_dim -> hidden_dim_2 // 2
+            classifier_hidden_dim = hidden_dim_2 // 2
+            self.classifier = nn.Sequential(
+                nn.Linear(hidden_dim_2, classifier_hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(classifier_hidden_dim, 1)
+            )
+        else:
+            # Single classifier layer (backward compatible)
+            self.classifier = nn.Linear(hidden_dim_2, 1)
 
         self.embedding_dim = embedding_dim
         self.num_node_features = num_node_features
@@ -60,11 +74,8 @@ if __name__ == "__main__":
     # Test forward pass
     model.eval()
     with torch.no_grad():
-        x = data.x
-        edge_index = data.edge_index
-        batch = data.batch
-        output = model(x=x, edge_index=edge_index, batch=batch)
-        print(f"Input shape: {x.shape}")
+        output = model(x=data.x, edge_index=data.edge_index, batch=data.batch)
+        print(f"Input shape: {data.x.shape}")
         print(f"Output shape: {output.shape}")
         print(f"Output sample: {output.squeeze().item():.4f}")
     
@@ -77,13 +88,26 @@ if __name__ == "__main__":
     data_batch = Data(x=x_batch, edge_index=edge_index_batch, batch=batch_tensor)
     
     with torch.no_grad():
-        x = data_batch.x
-        edge_index = data_batch.edge_index
-        batch = data_batch.batch
-        output_batch = model(x=x, edge_index=edge_index, batch=batch)
-        print(f"Batch input: {x_batch.shape} nodes, {batch_size} graphs")
+        output_batch = model(x=data_batch.x, edge_index=data_batch.edge_index, batch=data_batch.batch)
+        print(f"Batch input: {data_batch.x.shape} nodes, {batch_size} graphs")
         print(f"Batch output: {output_batch.shape}")
     
     print("Model test completed successfully!")
+    
+    # Test the new two-layer classifier option
+    print("\nTesting two-layer classifier...")
+    model_2layer = GCN(num_node_features=vocab_size, embedding_dim=128, hidden_dim_1=64, use_two_layer_classifier=True)
+    
+    total_params_2layer = sum(p.numel() for p in model_2layer.parameters())
+    print(f"Two-layer classifier parameters: {total_params_2layer:,}")
+    
+    # Test forward pass with two-layer classifier
+    model_2layer.eval()
+    with torch.no_grad():
+        output_2layer = model_2layer(x=data.x, edge_index=data.edge_index, batch=data.batch)
+        print(f"Two-layer classifier output shape: {output_2layer.shape}")
+        print(f"Two-layer classifier output sample: {output_2layer.squeeze().item():.4f}")
+    
+    print("Two-layer classifier test completed successfully!")
 
 # posebni grafovi, dataflow, comments next steps

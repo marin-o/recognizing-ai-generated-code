@@ -27,7 +27,8 @@ def save_model(model, optimizer, epoch, best_vloss, best_vacc, save_path='models
         'embedding_dim': model.embedding_dim,
         'hidden_dim_1': model.conv1.out_channels,
         'hidden_dim_2': model.conv2.out_channels,
-        'sage': isinstance(model.conv1, SAGEConv)
+        'sage': isinstance(model.conv1, SAGEConv),
+        'use_two_layer_classifier': model.use_two_layer_classifier
     }
     
     # Prepare checkpoint data
@@ -92,7 +93,7 @@ def load_model(model, optimizer, save_path='models/gnn', model_name=None, schedu
     
     return checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
 
-def create_model_with_optuna_params(num_node_features, storage_url, study_name, model_name, use_default_on_failure=True, source_study_name=None):
+def create_model_with_optuna_params(num_node_features, storage_url, study_name, model_name, use_default_on_failure=True, source_study_name=None, override_two_layer_classifier=None):
     """
     Create a GCN model, optimizer, and scheduler using best hyperparameters from Optuna study.
     
@@ -103,6 +104,7 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
         model_name: Name for the model (used for model.name attribute)
         use_default_on_failure: If True, create model with default params if Optuna loading fails
         source_study_name: Optional source study name to load parameters from (overrides study_name)
+        override_two_layer_classifier: If provided (True/False), overrides the use_two_layer_classifier parameter from the study
         
     Returns:
         tuple: (model, optimizer, scheduler, success_flag)
@@ -120,6 +122,14 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
         for key, value in best_params.items():
             print(f"  {key}: {value}")
         
+        # Determine classifier type
+        if override_two_layer_classifier is not None:
+            use_two_layer_classifier = override_two_layer_classifier
+            print(f"  use_two_layer_classifier: {use_two_layer_classifier} (OVERRIDDEN)")
+        else:
+            use_two_layer_classifier = best_params.get("use_two_layer_classifier", False)
+            print(f"  use_two_layer_classifier: {use_two_layer_classifier} (from study)")
+        
         # Create model with best hyperparameters
         model = GCN(
             num_node_features,
@@ -127,6 +137,7 @@ def create_model_with_optuna_params(num_node_features, storage_url, study_name, 
             hidden_dim_2=best_params["hidden_dim_2"],
             embedding_dim=best_params["embedding_dim"],
             sage=best_params["sage"],
+            use_two_layer_classifier=use_two_layer_classifier,
         ).to(DEVICE)
         
         optimizer = torch.optim.Adam(model.parameters(), lr=best_params["lr"])
@@ -190,7 +201,8 @@ def create_model_from_checkpoint(checkpoint_path, model_name=None):
         embedding_dim=config['embedding_dim'],
         hidden_dim_1=config['hidden_dim_1'],
         hidden_dim_2=config['hidden_dim_2'],
-        sage=config['sage']
+        sage=config['sage'],
+        use_two_layer_classifier=config.get('use_two_layer_classifier', False)
     ).to(DEVICE)
     
     # Create optimizer (we don't save lr in config, so use a default)
@@ -461,6 +473,9 @@ def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
         sage = trial.suggest_categorical("sage", [True, False])
         lr = trial.suggest_float('lr', low=0.0001, high=0.01, log=True)
         
+        # Classifier hyperparameters
+        use_two_layer_classifier = trial.suggest_categorical("use_two_layer_classifier", [True, False])
+        
         # Scheduler hyperparameters
         use_scheduler = trial.suggest_categorical("use_scheduler", [True, False])
         if use_scheduler:
@@ -474,6 +489,7 @@ def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
             hidden_dim_2=hidden_dim_2,
             embedding_dim=embedding_dim,
             sage=sage,
+            use_two_layer_classifier=use_two_layer_classifier,
         ).to(DEVICE)
         
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
