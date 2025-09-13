@@ -53,8 +53,8 @@ class GCN(nn.Module):
 
 class GCNWithPositionalEncoding(nn.Module):
     def __init__(self, num_node_features, max_depth=50, max_child_index=20, 
-                 embedding_dim=256, hidden_dim_1=128, hidden_dim_2=128, 
-                 sage=False, use_two_layer_classifier=False, dropout=0.1, 
+                 embedding_dim=176, hidden_dim_1=512, hidden_dim_2=400, 
+                 sage=True, use_two_layer_classifier=True, dropout=0.1, 
                  pooling_method='mean', depth_embedding_dim=32, child_embedding_dim=32):
         super().__init__()
         
