@@ -16,7 +16,7 @@ class GCN(nn.Module):
             self.conv1 = GCNConv(embedding_dim, hidden_dim_1)
             self.conv2 = GCNConv(hidden_dim_1, hidden_dim_2)
 
-        # self.attention_pool = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim, 1))
+        # self.pooling = AttentionalAggregation(gate_nn=nn.Linear(hidden_dim_2, 1))
         self.pooling = global_mean_pool
         
         # Classifier layers - single or double based on use_two_layer_classifier
