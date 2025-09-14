@@ -26,7 +26,16 @@ class SimpleLinearHeadClassifier(nn.Module):
             for param in self.codebert.parameters():
                 param.requires_grad = False
         self.dropout = nn.Dropout(dropout_rate)
-        self.classifier = nn.Linear(self.codebert.config.hidden_size, num_classes)
+        
+        # 2-layer classifier head
+        hidden_size = self.codebert.config.hidden_size
+        classifier_hidden_dim = hidden_size // 2  # Half the input size
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_size, classifier_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(classifier_hidden_dim, num_classes)
+        )
 
     def forward(
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor

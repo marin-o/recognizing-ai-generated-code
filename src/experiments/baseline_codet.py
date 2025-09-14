@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import StepLR
 from torchmetrics import Accuracy, F1Score, Recall, Precision, Specificity, AUROC
 from transformers import RobertaTokenizer
 from tqdm import tqdm
-from data.dataset import CoDeTM4
+from data.dataset import CoDeTM4Cleaned
 from models.baseline_model import SimpleLinearHeadClassifier
 from utils.utils import tokenize_fn
 
@@ -324,7 +324,9 @@ def main():
     logger.info(f"Using device: {device}")
 
     # Load and preprocess dataset
-    dataset = CoDeTM4(cache_dir=args.cache_dir)
+    # Load cleaned dataset
+    cleaned_data_path = "/home/bosa/diplomska/data/codet_cleaned_20250812_201438"
+    dataset = CoDeTM4Cleaned(cleaned_data_path)
     train, val, test = dataset.get_dataset(
         columns=['code','target_binary'],
         split=['train','val','test'],
