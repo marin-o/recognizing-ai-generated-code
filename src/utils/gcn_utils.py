@@ -473,8 +473,9 @@ def create_objective(train_dataloader, val_dataloader, num_epochs, writer=None):
         sage = trial.suggest_categorical("sage", [True, False])
         lr = trial.suggest_float('lr', low=0.0001, high=0.01, log=True)
         
-        # Classifier hyperparameters
-        use_two_layer_classifier = trial.suggest_categorical("use_two_layer_classifier", [True, False])
+        # Classifier hyperparameters - permanently set to True for better performance
+        # To make this optimizable again, change [True] to [True, False]
+        use_two_layer_classifier = trial.suggest_categorical("use_two_layer_classifier", [True])
         
         # Scheduler hyperparameters
         use_scheduler = trial.suggest_categorical("use_scheduler", [True, False])

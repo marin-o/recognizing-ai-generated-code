@@ -70,7 +70,9 @@ if __name__ == "__main__":
             learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
             pooling_method = trial.suggest_categorical('pooling_method', ['mean', 'max', 'add'])
             sage = trial.suggest_categorical('sage', [True, False])
-            use_two_layer_classifier = trial.suggest_categorical('use_two_layer_classifier', [True, False])
+            # Classifier hyperparameters - permanently set to True for better performance
+            # To make this optimizable again, change [True] to [True, False]
+            use_two_layer_classifier = trial.suggest_categorical('use_two_layer_classifier', [True])
             
             # Positional encoding hyperparameters (if enabled and optimizing)
             pos_config = {}
