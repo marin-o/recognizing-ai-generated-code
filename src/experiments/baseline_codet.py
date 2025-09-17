@@ -2,6 +2,10 @@ import argparse
 import logging
 import sys
 import os
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -80,6 +84,17 @@ def parse_args():
         "--eval",
         action="store_true",
         help="Only evaluate the model without training",
+    )
+    parser.add_argument(
+        "--enable-misclassification-analysis",
+        action="store_true",
+        help="Enable misclassification analysis and visualization generation"
+    )
+    parser.add_argument(
+        "--analysis-dir",
+        type=str,
+        default="analysis_results",
+        help="Directory to save analysis results and visualizations"
     )
     return parser.parse_args()
 
@@ -233,6 +248,243 @@ def evaluate_model(
     writer.close()
 
     return test_metrics
+
+
+def analyze_misclassified_samples(model, dataloader, criterion, analysis_dir="analysis", model_name="BaselineCodeT"):
+    """
+    Analyze misclassified samples and create visualizations of text length distributions.
+    
+    Args:
+        model: Trained PyTorch model
+        dataloader: DataLoader containing test samples
+        criterion: Loss function
+        analysis_dir: Directory to save analysis results
+        model_name: Name of the model for file naming
+        
+    Returns:
+        dict: Analysis results including misclassification counts and statistics
+    """
+    print("Starting misclassification analysis...")
+    
+    # Determine device based on model location
+    device = next(model.parameters()).device
+    
+    # Create analysis directory
+    os.makedirs(analysis_dir, exist_ok=True)
+    
+    model.eval()
+    all_predictions = []
+    all_true_labels = []
+    all_text_lengths = []
+    all_probs = []
+    
+    # Initialize tokenizer for text length calculation
+    tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
+    
+    # Collect predictions and text information
+    with torch.no_grad():
+        for data in tqdm(dataloader, desc="Collecting predictions", leave=False):
+            input_ids = data["input_ids"].to(device)
+            attention_mask = data["attention_mask"].to(device)
+            labels = data["target_binary"].to(device)
+            
+            # Get model predictions
+            outputs = model(input_ids, attention_mask)
+            probabilities = torch.softmax(outputs, dim=1)
+            _, predicted = torch.max(outputs, 1)
+            
+            # Store results
+            all_predictions.extend(predicted.cpu().numpy())
+            all_true_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probabilities[:, 1].cpu().numpy())  # Probability of positive class
+            
+            # Calculate text lengths for each sample in the batch
+            for i in range(input_ids.size(0)):
+                # Count non-padding tokens (excluding special tokens)
+                non_pad_tokens = (input_ids[i] != tokenizer.pad_token_id).sum().item()
+                # Subtract special tokens (CLS, SEP)
+                text_length = max(0, non_pad_tokens - 2)
+                all_text_lengths.append(text_length)
+    
+    # Convert to numpy arrays
+    predictions = np.array(all_predictions)
+    true_labels = np.array(all_true_labels)
+    text_lengths = np.array(all_text_lengths)
+    probs = np.array(all_probs)
+    
+    # Identify misclassified samples
+    misclassified_mask = predictions != true_labels
+    correctly_classified_mask = predictions == true_labels
+    
+    # Get misclassified sample information
+    misclassified_lengths = text_lengths[misclassified_mask]
+    correctly_classified_lengths = text_lengths[correctly_classified_mask]
+    misclassified_true_labels = true_labels[misclassified_mask]
+    misclassified_predictions = predictions[misclassified_mask]
+    misclassified_probs = probs[misclassified_mask]
+    
+    # Calculate statistics
+    total_samples = len(predictions)
+    num_misclassified = np.sum(misclassified_mask)
+    misclassification_rate = num_misclassified / total_samples
+    
+    # False positives (predicted AI-generated, actually human)
+    false_positives = np.sum((predictions == 1) & (true_labels == 0))
+    # False negatives (predicted human, actually AI-generated)
+    false_negatives = np.sum((predictions == 0) & (true_labels == 1))
+    
+    print(f"Total samples: {total_samples}")
+    print(f"Misclassified samples: {num_misclassified}")
+    print(f"Misclassification rate: {misclassification_rate:.4f}")
+    print(f"False positives: {false_positives}")
+    print(f"False negatives: {false_negatives}")
+    
+    # Create analysis dataframe
+    analysis_data = {
+        'text_length': text_lengths,
+        'true_label': true_labels,
+        'prediction': predictions,
+        'probability': probs,
+        'misclassified': misclassified_mask
+    }
+    df = pd.DataFrame(analysis_data)
+    
+    # Save detailed results
+    results_file = os.path.join(analysis_dir, f"{model_name}_misclassification_analysis.csv")
+    df.to_csv(results_file, index=False)
+    print(f"Detailed analysis saved to: {results_file}")
+    
+    # Create visualizations
+    plt.style.use('default')
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle(f'{model_name} - Misclassification Analysis', fontsize=16, fontweight='bold')
+    
+    # 1. Text length distribution comparison
+    ax1 = axes[0, 0]
+    bins = np.linspace(0, max(text_lengths), 50)
+    ax1.hist(correctly_classified_lengths, bins=bins, alpha=0.7, label='Correctly Classified', 
+             color='green', density=True)
+    ax1.hist(misclassified_lengths, bins=bins, alpha=0.7, label='Misclassified', 
+             color='red', density=True)
+    ax1.set_xlabel('Text Length (Number of Tokens)')
+    ax1.set_ylabel('Density')
+    ax1.set_title('Text Length Distribution: Correct vs Misclassified')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Misclassification rate by text length bins
+    ax2 = axes[0, 1]
+    length_bins = np.percentile(text_lengths, [0, 25, 50, 75, 100])
+    length_labels = [f'{int(length_bins[i])}-{int(length_bins[i+1])}' for i in range(len(length_bins)-1)]
+    
+    misclass_rates = []
+    for i in range(len(length_bins)-1):
+        mask = (text_lengths >= length_bins[i]) & (text_lengths < length_bins[i+1])
+        if i == len(length_bins)-2:  # Last bin should include the maximum
+            mask = (text_lengths >= length_bins[i]) & (text_lengths <= length_bins[i+1])
+        
+        if np.sum(mask) > 0:
+            rate = np.sum(misclassified_mask[mask]) / np.sum(mask)
+            misclass_rates.append(rate)
+        else:
+            misclass_rates.append(0)
+    
+    bars = ax2.bar(length_labels, misclass_rates, color='coral', alpha=0.7)
+    ax2.set_xlabel('Text Length Quartiles')
+    ax2.set_ylabel('Misclassification Rate')
+    ax2.set_title('Misclassification Rate by Text Length')
+    ax2.set_ylim(0, max(misclass_rates) * 1.1 if misclass_rates else 1)
+    
+    # Add value labels on bars
+    for bar, rate in zip(bars, misclass_rates):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{rate:.3f}', ha='center', va='bottom')
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. False positive vs False negative analysis by length
+    ax3 = axes[1, 0]
+    fp_mask = (predictions == 1) & (true_labels == 0)
+    fn_mask = (predictions == 0) & (true_labels == 1)
+    
+    fp_lengths = text_lengths[fp_mask]
+    fn_lengths = text_lengths[fn_mask]
+    
+    ax3.hist(fp_lengths, bins=30, alpha=0.7, label=f'False Positives (n={len(fp_lengths)})', 
+             color='orange', density=True)
+    ax3.hist(fn_lengths, bins=30, alpha=0.7, label=f'False Negatives (n={len(fn_lengths)})', 
+             color='purple', density=True)
+    ax3.set_xlabel('Text Length (Number of Tokens)')
+    ax3.set_ylabel('Density')
+    ax3.set_title('Error Type Distribution by Text Length')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Confidence analysis for misclassified samples
+    ax4 = axes[1, 1]
+    
+    # Separate misclassified by true label
+    misclass_ai_mask = misclassified_mask & (true_labels == 1)  # AI samples misclassified as human
+    misclass_human_mask = misclassified_mask & (true_labels == 0)  # Human samples misclassified as AI
+    
+    if np.sum(misclass_ai_mask) > 0:
+        ax4.hist(probs[misclass_ai_mask], bins=20, alpha=0.7, 
+                label=f'AI→Human (n={np.sum(misclass_ai_mask)})', color='blue')
+    if np.sum(misclass_human_mask) > 0:
+        ax4.hist(probs[misclass_human_mask], bins=20, alpha=0.7, 
+                label=f'Human→AI (n={np.sum(misclass_human_mask)})', color='red')
+    
+    ax4.axvline(x=0.5, color='black', linestyle='--', alpha=0.5, label='Decision Threshold')
+    ax4.set_xlabel('Prediction Probability')
+    ax4.set_ylabel('Frequency')
+    ax4.set_title('Prediction Confidence for Misclassified Samples')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    plot_file = os.path.join(analysis_dir, f"{model_name}_misclassification_analysis.png")
+    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+    print(f"Analysis plots saved to: {plot_file}")
+    
+    # Show the plot if in interactive mode
+    try:
+        plt.show()
+    except:
+        pass  # In case we're running in a non-interactive environment
+    finally:
+        plt.close()
+    
+    # Create summary statistics
+    summary_stats = {
+        'total_samples': total_samples,
+        'misclassified_samples': num_misclassified,
+        'misclassification_rate': misclassification_rate,
+        'false_positives': false_positives,
+        'false_negatives': false_negatives,
+        'avg_text_length_correct': np.mean(correctly_classified_lengths),
+        'avg_text_length_misclassified': np.mean(misclassified_lengths),
+        'std_text_length_correct': np.std(correctly_classified_lengths),
+        'std_text_length_misclassified': np.std(misclassified_lengths),
+        'median_text_length_correct': np.median(correctly_classified_lengths),
+        'median_text_length_misclassified': np.median(misclassified_lengths),
+    }
+    
+    # Save summary statistics
+    summary_file = os.path.join(analysis_dir, f"{model_name}_misclassification_summary.txt")
+    with open(summary_file, 'w') as f:
+        f.write(f"Misclassification Analysis Summary for {model_name}\n")
+        f.write("=" * 50 + "\n\n")
+        for key, value in summary_stats.items():
+            if isinstance(value, float):
+                f.write(f"{key}: {value:.6f}\n")
+            else:
+                f.write(f"{key}: {value}\n")
+    
+    print(f"Summary statistics saved to: {summary_file}")
+    print("\nMisclassification analysis completed!")
+    
+    return summary_stats
 
 
 def train_model(
@@ -401,6 +653,17 @@ def main():
     logger.info(f"Test auroc: {test_metrics['auroc']:.6f}")
     logger.info(f"Test f1: {test_metrics['f1']:.6f}")
     logger.info("="*50)
+
+    # Run misclassification analysis if enabled
+    if args.enable_misclassification_analysis:
+        logger.info("Running misclassification analysis...")
+        analyze_misclassified_samples(
+            model=model,
+            dataloader=test_dataloader,
+            criterion=criterion,
+            analysis_dir=args.analysis_dir,
+            model_name="BaselineCodeT"
+        )
 
 
 if __name__ == "__main__":

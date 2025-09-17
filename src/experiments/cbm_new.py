@@ -101,7 +101,23 @@ if __name__ == "__main__":
         # Evaluate on test set
         criterion = torch.nn.CrossEntropyLoss()
         metrics = get_metrics(device)
-        test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+        
+        # Create analysis directory if analysis is enabled
+        analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+        
+        # Perform evaluation with optional misclassification analysis
+        test_results = evaluate_model(
+            model, test_dataloader, criterion, metrics, device,
+            perform_analysis=args.enable_misclassification_analysis,
+            analysis_dir=analysis_dir,
+            model_name=MODEL_NAME
+        )
+        
+        # Handle the case where analysis might be returned
+        if isinstance(test_results, tuple):
+            test_results, analysis_results = test_results
+        else:
+            analysis_results = None
 
         # Log evaluation results to tensorboard
         if writer is not None:
@@ -212,6 +228,9 @@ if __name__ == "__main__":
                     
                     # Validation
                     val_results = evaluate_model(model, trial_val_loader, criterion, metrics, device)
+                    # Handle the case where analysis might be returned
+                    if isinstance(val_results, tuple):
+                        val_results = val_results[0]  # Take only the metrics, ignore analysis
                     scheduler.step()
                     
                     current_f1 = val_results['f1']
@@ -370,6 +389,9 @@ if __name__ == "__main__":
 
             # Final evaluation on test set
             test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+            # Handle the case where analysis might be returned
+            if isinstance(test_results, tuple):
+                test_results = test_results[0]  # Take only the metrics, ignore analysis
 
             # Log final test results
             if writer is not None:
@@ -467,6 +489,9 @@ if __name__ == "__main__":
 
             # Final evaluation on test set
             test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+            # Handle the case where analysis might be returned
+            if isinstance(test_results, tuple):
+                test_results = test_results[0]  # Take only the metrics, ignore analysis
 
             # Log resumed training final test results
             if writer is not None:

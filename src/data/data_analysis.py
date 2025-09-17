@@ -33,7 +33,7 @@ class CoDeTDataAnalyzer:
             fig.write_html(f"{save_path}/{chart_name}.html")
     
     def load_data(self):
-        from dataset import CoDeTM4
+        from data.dataset.codet_m4 import CoDeTM4
         self.train, self.val, self.test = CoDeTM4(self.data_path).get_dataset(
             ['train', 'val', 'test'], columns='all', dynamic_split_sizing=False)
         self._create_combined_dataframe()
@@ -106,15 +106,29 @@ class CoDeTDataAnalyzer:
         return fig
     
     def chart5_code_length_distribution(self, save_path=None):
-        fig = go.Figure()
+        fig = make_subplots(rows=1, cols=3, 
+                           subplot_titles=['Train Split', 'Validation Split', 'Test Split'],
+                           shared_yaxes=True)
         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1']
         splits = ['Train', 'Validation', 'Test']
+        
         for i, split in enumerate(splits):
             split_data = self.df_combined[self.df_combined['split'] == split]['code_length']
-            fig.add_trace(go.Histogram(x=split_data, name=split, opacity=0.7, nbinsx=50, marker_color=colors[i]))
-        fig.update_layout(title="Code Length Distribution Across Dataset Splits", title_font_size=16, title_x=0.5,
-                          xaxis_title="Code Length (characters)", yaxis_title="Frequency", barmode='overlay',
-                          width=900, height=500, legend_title="Dataset Split")
+            fig.add_trace(go.Histogram(x=split_data, name=split, opacity=0.8, nbinsx=50, 
+                                     marker_color=colors[i], showlegend=False), 
+                         row=1, col=i+1)
+        
+        fig.update_layout(title="Code Length Distribution by Dataset Split", 
+                         title_font_size=16, title_x=0.5,
+                         width=1200, height=500)
+        
+        # Update x-axes labels for all subplots
+        for i in range(1, 4):
+            fig.update_xaxes(title_text="Code Length (characters)", row=1, col=i)
+        
+        # Update y-axis label for the first subplot only
+        fig.update_yaxes(title_text="Frequency", row=1, col=1)
+        
         if save_path:
             self._safe_save_figure(fig, save_path, "chart5_code_length_distribution")
         fig.show()

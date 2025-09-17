@@ -137,9 +137,13 @@ if __name__ == "__main__":
                     optimizer.step()
                 
                 # Validation phase
-                val_loss, val_metrics = enhanced_evaluate(
+                val_results = enhanced_evaluate(
                     model, val_dataloader, criterion, metrics, USE_POSITIONAL_ENCODING, has_pos_encodings
                 )
+                if len(val_results) == 3:
+                    val_loss, val_metrics, _ = val_results
+                else:
+                    val_loss, val_metrics = val_results
                 
                 scheduler.step(val_loss)
                 best_val_loss = min(best_val_loss, val_loss)
@@ -205,9 +209,23 @@ if __name__ == "__main__":
         # Evaluate on test set
         criterion = torch.nn.BCEWithLogitsLoss()
         metrics = get_metrics()
-        test_loss, test_metrics = enhanced_evaluate(
-            model, test_dataloader, criterion, metrics, is_pos_model, has_pos_data
+        
+        # Create analysis directory if analysis is enabled
+        analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+        
+        # Perform evaluation with optional misclassification analysis
+        test_results = enhanced_evaluate(
+            model, test_dataloader, criterion, metrics, is_pos_model, has_pos_data,
+            perform_analysis=args.enable_misclassification_analysis, 
+            analysis_dir=analysis_dir, 
+            model_name=MODEL_NAME
         )
+        
+        if len(test_results) == 3:
+            test_loss, test_metrics, analysis_results = test_results
+        else:
+            test_loss, test_metrics = test_results
+            analysis_results = None
 
         # Log evaluation results to tensorboard
         if writer is not None:
@@ -363,9 +381,13 @@ if __name__ == "__main__":
             if hasattr(test_dataloader, 'dataset_obj') and hasattr(test_dataloader.dataset_obj, 'has_positional_encodings'):
                 test_has_pos_encodings = test_dataloader.dataset_obj.has_positional_encodings()
             
-            test_loss, test_metrics = enhanced_evaluate(
+            test_results = enhanced_evaluate(
                 model, test_dataloader, criterion, metrics, USE_POSITIONAL_ENCODING, test_has_pos_encodings
             )
+            if len(test_results) == 3:
+                test_loss, test_metrics, _ = test_results
+            else:
+                test_loss, test_metrics = test_results
 
             # Log final test results
             if writer is not None:
@@ -464,9 +486,13 @@ if __name__ == "__main__":
             if hasattr(test_dataloader, 'dataset_obj') and hasattr(test_dataloader.dataset_obj, 'has_positional_encodings'):
                 test_has_pos_encodings = test_dataloader.dataset_obj.has_positional_encodings()
             
-            test_loss, test_metrics = enhanced_evaluate(
+            test_results = enhanced_evaluate(
                 model, test_dataloader, criterion, metrics, model_uses_pos_encoding, test_has_pos_encodings
             )
+            if len(test_results) == 3:
+                test_loss, test_metrics, _ = test_results
+            else:
+                test_loss, test_metrics = test_results
 
             # Log resumed training final test results
             if writer is not None:

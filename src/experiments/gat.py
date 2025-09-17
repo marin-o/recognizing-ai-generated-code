@@ -87,7 +87,23 @@ if __name__ == "__main__":
         # Evaluate on test set
         criterion = torch.nn.BCEWithLogitsLoss()
         metrics = get_metrics()
-        test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+        
+        # Create analysis directory if analysis is enabled
+        analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+        
+        # Perform evaluation with optional misclassification analysis
+        test_results = evaluate(
+            model, test_dataloader, criterion, metrics, 
+            perform_analysis=args.enable_misclassification_analysis, 
+            analysis_dir=analysis_dir, 
+            model_name=MODEL_NAME
+        )
+        
+        if len(test_results) == 3:
+            test_loss, test_metrics, analysis_results = test_results
+        else:
+            test_loss, test_metrics = test_results
+            analysis_results = None
 
         # Log evaluation results to tensorboard
         if writer is not None:
@@ -219,7 +235,11 @@ if __name__ == "__main__":
             epoch, best_vloss, best_vacc = load_model(
                 model, optimizer, save_path="models/gat", scheduler=scheduler
             )
-            test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+            test_results = evaluate(model, test_dataloader, criterion, metrics)
+            if len(test_results) == 3:
+                test_loss, test_metrics, _ = test_results
+            else:
+                test_loss, test_metrics = test_results
 
             # Log final test results
             if writer is not None:
@@ -303,7 +323,11 @@ if __name__ == "__main__":
             epoch, best_vloss, best_vacc = load_model(
                 model, optimizer, save_path="models/gat", scheduler=scheduler
             )
-            test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+            test_results = evaluate(model, test_dataloader, criterion, metrics)
+            if len(test_results) == 3:
+                test_loss, test_metrics, _ = test_results
+            else:
+                test_loss, test_metrics = test_results
 
             # Log resumed training final test results
             if writer is not None:

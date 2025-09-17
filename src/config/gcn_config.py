@@ -362,6 +362,17 @@ Command-specific help:
         action="store_true",
         help="Disable tensorboard logging"
     )
+    logging_group.add_argument(
+        "--enable-misclassification-analysis",
+        action="store_true",
+        help="Enable detailed misclassification analysis during evaluation (creates plots and statistics)"
+    )
+    logging_group.add_argument(
+        "--analysis-dir",
+        type=str,
+        default="analysis",
+        help="Directory to save misclassification analysis results"
+    )
     
     args = parser.parse_args()
     

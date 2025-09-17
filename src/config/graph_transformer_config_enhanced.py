@@ -430,6 +430,20 @@ Command-specific help:
         help="Disable tensorboard logging"
     )
     
+    # Analysis parameters
+    analysis_group = parser.add_argument_group("Analysis Parameters")
+    analysis_group.add_argument(
+        "--enable-misclassification-analysis",
+        action="store_true",
+        help="Enable misclassification analysis and visualization generation"
+    )
+    analysis_group.add_argument(
+        "--analysis-dir",
+        type=str,
+        default="analysis",
+        help="Directory to save analysis results and visualizations"
+    )
+    
     args = parser.parse_args()
     
     # Set defaults and validate
