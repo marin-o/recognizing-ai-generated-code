@@ -6,6 +6,7 @@
 /tensorboard_logs/
 /runs/
 /data_stats/
+analysis/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
