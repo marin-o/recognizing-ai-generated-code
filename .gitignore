@@ -7,6 +7,8 @@
 /runs/
 /data_stats/
 analysis/
+
+codet_graphs.7z
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
