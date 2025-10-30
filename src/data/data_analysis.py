@@ -33,7 +33,7 @@ class CoDeTDataAnalyzer:
             fig.write_html(f"{save_path}/{chart_name}.html")
     
     def load_data(self):
-        from data.dataset.codet_m4 import CoDeTM4
+        from dataset.codet_m4 import CoDeTM4
         self.train, self.val, self.test = CoDeTM4(self.data_path).get_dataset(
             ['train', 'val', 'test'], columns='all', dynamic_split_sizing=False)
         self._create_combined_dataframe()
@@ -54,8 +54,8 @@ class CoDeTDataAnalyzer:
         split_counts = self.df_combined['split'].value_counts()
         fig = px.pie(values=split_counts.values, names=split_counts.index, title="Dataset Split Proportions",
                      color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1'])
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        fig.update_layout(title_font_size=16, title_x=0.5, showlegend=True, width=600, height=500)
+        fig.update_traces(textposition='inside', textinfo='percent+label', textfont=dict(color='white'))
+        fig.update_layout(title_font_size=16, title_x=0.5, showlegend=True, width=600, height=500, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart1_split_proportions")
         fig.show()
@@ -69,7 +69,7 @@ class CoDeTDataAnalyzer:
                      labels={'value': 'Number of Samples', 'index': 'Dataset Split'},
                      color_discrete_sequence=['#FF9999', '#66B2FF', '#99FF99'])
         fig.update_layout(title_font_size=16, title_x=0.5, xaxis_title="Dataset Split", yaxis_title="Number of Samples",
-                          legend_title="Programming Language", width=800, height=500, bargap=0.3)
+                          legend_title="Programming Language", width=800, height=500, bargap=0.3, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart2_language_distribution")
         fig.show()
@@ -86,7 +86,7 @@ class CoDeTDataAnalyzer:
                                  marker_color=colors[i], opacity=0.8))
         fig.update_layout(title="Target Class Distribution Across Dataset Splits", title_font_size=16, title_x=0.5,
                           xaxis_title="Target Class", yaxis_title="Number of Samples", barmode='group',
-                          width=700, height=500, legend_title="Dataset Split")
+                          width=700, height=500, legend_title="Dataset Split", plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart3_target_distribution")
         fig.show()
@@ -99,7 +99,7 @@ class CoDeTDataAnalyzer:
                         color_continuous_scale='RdYlBu_r', title="Target Class Distribution by Programming Language (%)",
                         text_auto='.1f')
         fig.update_layout(title_font_size=16, title_x=0.5, xaxis_title="Target Class", yaxis_title="Programming Language",
-                          width=600, height=400)
+                          width=600, height=400, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart4_language_target_heatmap")
         fig.show()
@@ -120,7 +120,7 @@ class CoDeTDataAnalyzer:
         
         fig.update_layout(title="Code Length Distribution by Dataset Split", 
                          title_font_size=16, title_x=0.5,
-                         width=1200, height=500)
+                         width=1200, height=500, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         
         # Update x-axes labels for all subplots
         for i in range(1, 4):
@@ -140,7 +140,7 @@ class CoDeTDataAnalyzer:
             fig = px.bar(x=model_counts.values, y=model_counts.index, orientation='h',
                          title="Model Distribution in Dataset", labels={'x': 'Number of Samples', 'y': 'Model'},
                          color=model_counts.values, color_continuous_scale='viridis')
-            fig.update_layout(title_font_size=16, title_x=0.5, width=800, height=600, showlegend=False)
+            fig.update_layout(title_font_size=16, title_x=0.5, width=800, height=600, showlegend=False, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
             if save_path:
                 self._safe_save_figure(fig, save_path, "chart6_model_distribution")
             fig.show()
@@ -157,7 +157,7 @@ class CoDeTDataAnalyzer:
                          color_discrete_sequence=px.colors.qualitative.Set3)
             fig.update_layout(title_font_size=16, title_x=0.5, xaxis_title="Dataset Split",
                               yaxis_title="Number of Samples", legend_title="Model",
-                              width=1000, height=600, bargap=0.3)
+                              width=1000, height=600, bargap=0.3, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
             if save_path:
                 self._safe_save_figure(fig, save_path, "chart7_model_split_distribution")
             fig.show()
@@ -179,7 +179,7 @@ class CoDeTDataAnalyzer:
                              y=target_percentages['positive_pct'], marker_color='#4ECDC4', opacity=0.8))
         fig.update_layout(title="Target Class Balance Across Dataset Splits (%)", title_font_size=16, title_x=0.5,
                           xaxis_title="Dataset Split", yaxis_title="Percentage", barmode='stack',
-                          width=700, height=500, legend_title="Target Class")
+                          width=700, height=500, legend_title="Target Class", plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         for i, row in target_percentages.iterrows():
             fig.add_annotation(x=row['split'], y=row['negative_pct']/2, text=f"{row['negative_pct']:.1f}%",
                                showarrow=False, font=dict(color="white", size=12))
@@ -195,7 +195,7 @@ class CoDeTDataAnalyzer:
                      title="Code Length Distribution by Programming Language", color='language',
                      color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1'])
         fig.update_layout(title_font_size=16, title_x=0.5, xaxis_title="Programming Language",
-                          yaxis_title="Code Length (characters)", width=800, height=500, showlegend=False)
+                          yaxis_title="Code Length (characters)", width=800, height=500, showlegend=False, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart9_code_length_by_language")
         fig.show()
@@ -206,7 +206,7 @@ class CoDeTDataAnalyzer:
         fig = px.sunburst(lang_split_counts, path=['language', 'split'], values='count',
                           title="Hierarchical View: Language → Split Distribution",
                           color_discrete_sequence=px.colors.qualitative.Set3)
-        fig.update_layout(title_font_size=16, title_x=0.5, width=700, height=700)
+        fig.update_layout(title_font_size=16, title_x=0.5, width=700, height=700, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart10_language_split_sunburst")
         fig.show()
@@ -230,9 +230,9 @@ class CoDeTDataAnalyzer:
             summary_stats.append(stats)
         summary_df = pd.DataFrame(summary_stats)
         fig = go.Figure(data=[go.Table(
-            header=dict(values=list(summary_df.columns), fill_color='lightblue', align='center', font=dict(size=12)),
-            cells=dict(values=[summary_df[col] for col in summary_df.columns], fill_color='white', align='center', font=dict(size=11)))])
-        fig.update_layout(title="Dataset Statistics Summary", title_font_size=16, title_x=0.5, width=1200, height=400)
+            header=dict(values=list(summary_df.columns), fill_color='#003d5c', align='center', font=dict(size=12, color='white')),
+            cells=dict(values=[summary_df[col] for col in summary_df.columns], fill_color='white', align='center', font=dict(size=11, color='black')))])
+        fig.update_layout(title="Dataset Statistics Summary", title_font_size=16, title_x=0.5, width=1200, height=400, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart11_summary_table")
         fig.show()
@@ -243,7 +243,7 @@ class CoDeTDataAnalyzer:
         corr_matrix = self.df_combined[numerical_cols].corr()
         fig = px.imshow(corr_matrix, title="Correlation Matrix of Numerical Features",
                         color_continuous_scale='RdBu_r', aspect="auto", text_auto='.3f')
-        fig.update_layout(title_font_size=16, title_x=0.5, width=600, height=500)
+        fig.update_layout(title_font_size=16, title_x=0.5, width=600, height=500, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart12_correlation_matrix")
         fig.show()
@@ -265,12 +265,12 @@ class CoDeTDataAnalyzer:
                              name="Affected Samples", marker_color='#4ECDC4'), row=1, col=2)
         fig.add_trace(go.Histogram(x=duplicates_info['duplicate_lengths'], name="Code Length",
                                   marker_color='#45B7D1', nbinsx=30), row=2, col=1)
-        fig.add_trace(go.Table(header=dict(values=['Metric', 'Value'], fill_color='lightblue', align='center'),
+        fig.add_trace(go.Table(header=dict(values=['Metric', 'Value'], fill_color='#003d5c', align='center', font=dict(size=12, color='white')),
                               cells=dict(values=[list(duplicates_info['summary_stats'].keys()),
                                                list(duplicates_info['summary_stats'].values())],
-                                        fill_color='white', align='center')), row=2, col=2)
+                                        fill_color='white', align='center', font=dict(size=11, color='black'))), row=2, col=2)
         fig.update_layout(title="Data Leakage Analysis: Exact Matches Between Splits", title_font_size=16,
-                          title_x=0.5, height=800, width=1200, showlegend=False)
+                          title_x=0.5, height=800, width=1200, showlegend=False, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         fig.update_xaxes(title_text="Overlap Type", row=1, col=1)
         fig.update_yaxes(title_text="Number of Duplicates", row=1, col=1)
         fig.update_xaxes(title_text="Dataset Split", row=1, col=2)
@@ -343,14 +343,14 @@ class CoDeTDataAnalyzer:
                                      text=list(overlap_details.values()), textposition='inside', textfont_size=14, textangle=0)])
         fig.update_layout(title="Data Leakage: Detailed Split Overlap Analysis", title_font_size=16, title_x=0.5,
                           xaxis_title="Split Combination", yaxis_title="Number of Duplicate Code Samples",
-                          width=800, height=500, showlegend=False, plot_bgcolor='white')
+                          width=800, height=500, showlegend=False, plot_bgcolor='#005896', paper_bgcolor='#005896', font=dict(color='white'))
         fig.update_yaxes(gridcolor='lightgray', gridwidth=1)
         fig.update_xaxes(gridcolor='lightgray', gridwidth=1)
         total_duplicates = sum(overlap_details.values())
         for i, (split_combo, count) in enumerate(overlap_details.items()):
             percentage = (count / total_duplicates * 100) if total_duplicates > 0 else 0
             fig.add_annotation(x=split_combo, y=count + max(overlap_details.values()) * 0.02,
-                               text=f"{percentage:.1f}%", showarrow=False, font=dict(size=12, color="black"))
+                               text=f"{percentage:.1f}%", showarrow=False, font=dict(size=12, color="white"))
         if save_path:
             self._safe_save_figure(fig, save_path, "chart14_simple_data_leakage_breakdown")
         fig.show()
