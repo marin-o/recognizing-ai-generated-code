@@ -13,6 +13,7 @@ import logging
 import optuna
 from transformers import RobertaModel
 from datasets import Dataset
+from typing import Tuple, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -509,100 +510,119 @@ def create_model_with_optuna_params(storage_url, study_name, model_name,
             raise e
 
 def load_dataset(cache_dir, train_subset=0.1, full_test_set=False, val_ratio=0.1, test_ratio=0.2, 
-                 use_cleaned=False, cleaned_data_path=None):
+                 use_cleaned=False, cleaned_data_path=None, dataset_type="codet", subtask="A") -> Tuple[Dataset, Dataset, Dataset]:
     """
-    Load the CoDeTM4 dataset with configurable validation and test ratios
+    Load the CoDeTM4 or SemEval dataset with configurable validation and test ratios
     
     Args:
-        cache_dir: Directory to cache the original dataset
+        cache_dir: Directory to cache the original dataset (CoDeTM4 only)
         train_subset: Fraction of training data to use
         full_test_set: Whether to use the full test set
         val_ratio: Validation set ratio
         test_ratio: Test set ratio
-        use_cleaned: Whether to use the cleaned dataset (duplicates removed)
-        cleaned_data_path: Path to cleaned dataset directory (auto-detected if None)
+        use_cleaned: Whether to use the cleaned dataset (CoDeTM4 only)
+        cleaned_data_path: Path to cleaned dataset directory (CoDeTM4 only)
+        dataset_type: Type of dataset to load ("codet" or "semeval")
+        subtask: Subtask for SemEval dataset ("A", "B", or "C")
     """
-    if use_cleaned:
-        # Try to import and use the cleaned dataset
-        try:
-            from data.dataset.codet_m4_cleaned import CoDeTM4Cleaned
-            
-            # Auto-detect cleaned data path if not provided
+    if dataset_type == "semeval":
+        # Load SemEval dataset
+        from data.dataset.semeval2026_task13 import SemEval2026Task13
+        dataset = SemEval2026Task13(subtask=subtask)
+        logger.info(f"Using SemEval 2026 Task 13 subtask {subtask}")
+        
+        if full_test_set:
+            # For evaluation, use full test set without downsampling
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=False,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+            logger.info(f"Using full test set with {len(test)} samples")
+        else:
+            # For training, use smaller subsets
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=True,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+        
+        dataset_type_str = f"semeval_{subtask}"
+        
+    elif dataset_type == "codet":
+        # Original CoDeTM4 loading logic
+        if use_cleaned:
+            # Try to use cleaned dataset first
             if cleaned_data_path is None:
-                # Look for the most recent cleaned dataset
-                import glob
-                possible_paths = glob.glob("data/codet_cleaned_*")
-                if possible_paths:
-                    cleaned_data_path = max(possible_paths)  # Get the most recent one
-                    logger.info(f"Auto-detected cleaned dataset: {cleaned_data_path}")
-                else:
-                    logger.warning("No cleaned dataset found, falling back to original dataset")
-                    use_cleaned = False
+                cleaned_data_path = use_cleaned_dataset_by_default()
             
-            if use_cleaned:
-                dataset = CoDeTM4Cleaned(cleaned_data_path=cleaned_data_path)
-                logger.info(f"Using cleaned dataset from: {cleaned_data_path}")
-                
-                # Get dataset info if available
+            if cleaned_data_path and os.path.exists(cleaned_data_path):
+                logger.info(f"Loading cleaned dataset from: {cleaned_data_path}")
                 try:
-                    info = dataset.get_info()
-                    if 'cleaning_metadata' in info:
-                        metadata = info['cleaning_metadata']
-                        logger.info(f"Cleaned dataset info:")
-                        logger.info(f"  Original sizes - Train: {metadata.get('original_sizes', {}).get('train', 'N/A')}, "
-                                  f"Val: {metadata.get('original_sizes', {}).get('val', 'N/A')}, "
-                                  f"Test: {metadata.get('original_sizes', {}).get('test', 'N/A')}")
-                        logger.info(f"  Cleaned sizes - Train: {metadata.get('cleaned_sizes', {}).get('train', 'N/A')}, "
-                                  f"Val: {metadata.get('cleaned_sizes', {}).get('val', 'N/A')}, "
-                                  f"Test: {metadata.get('cleaned_sizes', {}).get('test', 'N/A')}")
-                        logger.info(f"  Total samples removed: {sum(metadata.get('removed_counts', {}).values())}")
+                    from data.dataset.codet_m4_cleaned import CoDeTM4Cleaned
+                    dataset = CoDeTM4Cleaned(cleaned_data_path=cleaned_data_path)
+                    train, val, test = dataset.get_dataset(
+                        split=['train', 'val', 'test'], 
+                        columns=['code', 'target_binary'],
+                        train_subset=train_subset,
+                        dynamic_split_sizing=True,
+                        max_split_ratio=0.5,
+                        val_ratio=val_ratio,
+                        test_ratio=test_ratio
+                    )
+                    logger.info("Successfully loaded cleaned dataset")
                 except Exception as e:
-                    logger.debug(f"Could not load cleaning metadata: {e}")
-                    
-        except ImportError as e:
-            logger.warning(f"Could not import cleaned dataset class: {e}")
-            logger.info("Falling back to original dataset")
-            use_cleaned = False
-        except Exception as e:
-            logger.warning(f"Error loading cleaned dataset: {e}")
-            logger.info("Falling back to original dataset")
-            use_cleaned = False
+                    logger.warning(f"Failed to load cleaned dataset: {e}")
+                    logger.info("Falling back to original dataset")
+                    use_cleaned = False
+            else:
+                logger.warning("Cleaned dataset path not found, using original dataset")
+                use_cleaned = False
+        
+        # Use original dataset if not using cleaned or if cleaned failed
+        if not use_cleaned:
+            from data.dataset.codet_m4 import CoDeTM4
+            dataset = CoDeTM4(cache_dir=cache_dir)
+            logger.info(f"Using original dataset from cache: {cache_dir}")
+        
+        if full_test_set:
+            # For evaluation, use full test set without downsampling
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=False,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+            logger.info(f"Using full test set with {len(test)} samples")
+        else:
+            # For training, use smaller subsets
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=True,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+        
+        dataset_type_str = "cleaned" if use_cleaned else "original"
     
-    # Use original dataset if not using cleaned or if cleaned failed
-    if not use_cleaned:
-        from data.dataset.codet_m4 import CoDeTM4
-        dataset = CoDeTM4(cache_dir=cache_dir)
-        logger.info(f"Using original dataset from cache: {cache_dir}")
-    
-    if full_test_set:
-        # For evaluation, use full test set without downsampling
-        train, val, test = dataset.get_dataset(
-            split=['train', 'val', 'test'], 
-            columns=['code', 'target_binary'],
-            train_subset=train_subset,
-            dynamic_split_sizing=False,
-            max_split_ratio=0.5,
-            val_ratio=val_ratio,
-            test_ratio=test_ratio
-        )
-        logger.info(f"Using full test set with {len(test)} samples")
-    else:
-        # For training, use smaller subsets
-        train, val, test = dataset.get_dataset(
-            split=['train', 'val', 'test'], 
-            columns=['code', 'target_binary'],
-            train_subset=train_subset,
-            dynamic_split_sizing=True,
-            max_split_ratio=0.5,
-            val_ratio=val_ratio,
-            test_ratio=test_ratio
-        )
-    
-    dataset_type = "cleaned" if use_cleaned else "original"
-    logger.info(f"Dataset loaded ({dataset_type}) - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
+    logger.info(f"Dataset loaded ({dataset_type_str}) - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
     logger.info(f"Val ratio: {val_ratio:.1%}, Test ratio: {test_ratio:.1%}")
     
-    return train, val, test
+    return train, val, test  # type: ignore
 
 def get_available_cleaned_datasets():
     """Get list of available cleaned datasets"""
@@ -625,7 +645,7 @@ def get_available_cleaned_datasets():
                         metadata = json.load(f)
                     info['metadata'] = metadata
                     info['timestamp'] = metadata.get('cleaning_timestamp', 'Unknown')
-                    info['total_removed'] = sum(metadata.get('removed_counts', {}).values())
+                    info['total_removed'] = str(sum(metadata.get('removed_counts', {}).values()))
                 except Exception as e:
                     logger.debug(f"Could not load metadata for {path}: {e}")
             
@@ -649,7 +669,7 @@ def use_cleaned_dataset_by_default():
         return most_recent['path']
     return None
 
-def tokenize_datasets(train: Dataset, val: Dataset, test: Dataset, tokenizer, max_length):
+def tokenize_datasets(train: Optional[Dataset], val: Optional[Dataset], test: Optional[Dataset], tokenizer, max_length):
     """Tokenize train, validation, and test datasets"""
     tokenize = lambda x: tokenize_fn(tokenizer, x, max_length=max_length)
     logger.info("Tokenizing data...")

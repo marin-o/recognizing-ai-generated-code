@@ -5,6 +5,7 @@ from .codet_m4 import CoDeTM4
 from .codet_m4_cleaned import CoDeTM4Cleaned
 from .graph_codet import GraphCoDeTM4
 from .graph_aigcodeset import GraphAIGCodeSet
+from .semeval2026_task13 import SemEval2026Task13
 
 __all__ = [
     'AIGCodeSet',
@@ -14,4 +15,5 @@ __all__ = [
     'CoDeTM4Cleaned',
     'GraphCoDeTM4',
     'GraphAIGCodeSet',
+    'SemEval2026Task13',
 ]

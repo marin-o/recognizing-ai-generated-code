@@ -67,7 +67,9 @@ if __name__ == "__main__":
             val_ratio=args.val_ratio,
             test_ratio=args.test_ratio,
             use_cleaned=args.use_cleaned,
-            cleaned_data_path=args.cleaned_data_path
+            cleaned_data_path=args.cleaned_data_path,
+            dataset_type=args.dataset_type,
+            subtask=args.subtask
         )
         
         # Tokenize
@@ -82,7 +84,7 @@ if __name__ == "__main__":
         
         try:
             model, optimizer, scheduler, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
-                checkpoint_path, device=device
+                checkpoint_path, device=device  # type: ignore
             )
             logger.info(f"Loaded model from epoch {epoch}")
             logger.info(f"Best validation loss: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
@@ -164,7 +166,9 @@ if __name__ == "__main__":
                     val_ratio=args.val_ratio,
                     test_ratio=args.test_ratio,
                     use_cleaned=args.use_cleaned,
-                    cleaned_data_path=args.cleaned_data_path
+                    cleaned_data_path=args.cleaned_data_path,
+                    dataset_type=args.dataset_type,
+                    subtask=args.subtask
                 )
                 
                 trial_train, trial_val, _ = tokenize_datasets(
@@ -313,7 +317,9 @@ if __name__ == "__main__":
                 val_ratio=args.val_ratio,
                 test_ratio=args.test_ratio,
                 use_cleaned=args.use_cleaned,
-                cleaned_data_path=args.cleaned_data_path
+                cleaned_data_path=args.cleaned_data_path,
+                dataset_type=args.dataset_type,
+                subtask=args.subtask
             )
             
             # Tokenize
@@ -331,7 +337,7 @@ if __name__ == "__main__":
                     study_name=args.study_name,
                     model_name=MODEL_NAME,
                     pretrained_model=args.pretrained_model,
-                    device=device,
+                    device=device,  # type: ignore
                     use_default_on_failure=False
                 )
                 
@@ -421,7 +427,9 @@ if __name__ == "__main__":
                 val_ratio=args.val_ratio,
                 test_ratio=args.test_ratio,
                 use_cleaned=args.use_cleaned,
-                cleaned_data_path=args.cleaned_data_path
+                cleaned_data_path=args.cleaned_data_path,
+                dataset_type=args.dataset_type,
+                subtask=args.subtask
             )
             
             # Tokenize
@@ -437,7 +445,7 @@ if __name__ == "__main__":
             
             try:
                 model, optimizer, scheduler, start_epoch, best_vloss, best_vacc = create_model_from_checkpoint(
-                    checkpoint_path, device=device
+                    checkpoint_path, device=device  # type: ignore
                 )
                 logger.info(f"Resuming from epoch {start_epoch}")
                 logger.info(f"Best validation loss so far: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")

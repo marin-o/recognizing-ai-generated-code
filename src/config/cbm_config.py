@@ -362,7 +362,21 @@ Command-specific help:
         "--cleaned-data-path",
         type=str,
         default=None,
-        help="Path to cleaned dataset directory (if different from default)"
+        help="Path to cleaned dataset directory (auto-detected if not specified)"
+    )
+    data_group.add_argument(
+        "--dataset-type",
+        type=str,
+        choices=["codet", "semeval"],
+        default="codet",
+        help="Type of dataset to use: 'codet' for CoDeTM4 or 'semeval' for SemEval 2026 Task 13"
+    )
+    data_group.add_argument(
+        "--subtask",
+        type=str,
+        choices=["A", "B", "C"],
+        default="A",
+        help="Subtask for SemEval dataset (ignored for CoDeTM4)"
     )
     
     # System parameters
