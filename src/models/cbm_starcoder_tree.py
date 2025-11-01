@@ -284,13 +284,22 @@ def load_tokenizer(backbone_type: BackboneType = "codebert", model_name: Optiona
         Tokenizer instance
     """
     if model_name is not None:
-        return AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     elif backbone_type == "codebert":
-        return RobertaTokenizer.from_pretrained("microsoft/codebert-base")
+        tokenizer = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
     elif backbone_type == "starcoder":
-        return AutoTokenizer.from_pretrained("bigcode/starcoder2-3b", trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained("bigcode/starcoder2-3b", trust_remote_code=True)
     else:
         raise ValueError(f"Invalid backbone_type: {backbone_type}")
+    
+    # Ensure tokenizer has a padding token
+    if tokenizer.pad_token is None:
+        if tokenizer.eos_token is not None:
+            tokenizer.pad_token = tokenizer.eos_token
+        else:
+            tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+    
+    return tokenizer
 
 
 if __name__ == "__main__":
