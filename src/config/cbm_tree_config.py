@@ -269,6 +269,12 @@ Command-specific help:
         default=128,
         help="Dimension to project tree features to before concatenation"
     )
+    model_group.add_argument(
+        "--precomputed",
+        type=str,
+        default=None,
+        help="Path to precomputed embeddings dataset. If provided, uses precomputed embeddings instead of computing them on-the-fly. Example: data/embeddings/semeval_codebert_embeddings"
+    )
     
     # Architecture parameters
     arch_group = parser.add_argument_group("Architecture Parameters")

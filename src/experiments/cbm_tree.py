@@ -63,7 +63,14 @@ if __name__ == "__main__":
         load_dataset,
         tokenize_datasets,
         create_dataloaders,
+        # Precomputed embeddings functions
+        load_precomputed_dataset,
+        create_precomputed_dataloaders,
+        train_model_precomputed,
+        evaluate_model_precomputed,
+        create_precomputed_model_from_checkpoint,
     )
+    from models.cbm_precomputed import CBMPrecomputed
     from tqdm import tqdm
     
     # Set seed and device
@@ -81,42 +88,81 @@ if __name__ == "__main__":
         # Evaluation mode only - load model and evaluate on test set
         logger.info("Running in evaluation mode...")
         
-        # Load data
-        _, _, test = load_dataset(
-            train_subset=args.train_subset,
-            full_test_set=args.full_test_set,
-            val_ratio=args.val_ratio,
-            test_ratio=args.test_ratio,
-            subtask=args.subtask
-        )
+        # Check if using precomputed embeddings
+        use_precomputed = args.precomputed is not None
         
-        # Tokenize
-        tokenizer = load_tokenizer(args.backbone_type)
-        _, _, test = tokenize_datasets(None, None, test, tokenizer, args.max_length)
-        
-        # Create dataloader
-        _, _, test_dataloader = create_dataloaders(None, None, test, args.batch_size, args.num_workers)
-        
-        # Load model directly from checkpoint
-        checkpoint_path = f"models/cbm_tree/{MODEL_NAME}/best_model.pth"
-        
-        try:
-            model, optimizer, scheduler, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
-                checkpoint_path, device=device
+        if use_precomputed:
+            logger.info(f"Using precomputed embeddings from: {args.precomputed}")
+            # Load precomputed data
+            _, _, test = load_precomputed_dataset(
+                embeddings_path=args.precomputed,
+                train_subset=args.train_subset,
+                full_test_set=args.full_test_set,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio
             )
-            logger.info(f"Loaded model from epoch {epoch}")
-            logger.info(f"Best validation loss: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
-        except FileNotFoundError:
-            logger.error(f"No saved model found for {MODEL_NAME}")
-            logger.error(f"Expected path: {checkpoint_path}")
-            sys.exit(1)
-        except ValueError as e:
-            logger.error(f"Error: {e}")
-            logger.error("This checkpoint was saved with an older version that doesn't include architecture information.")
-            sys.exit(1)
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
-            sys.exit(1)
+            
+            # Create dataloader for precomputed embeddings
+            _, _, test_dataloader = create_precomputed_dataloaders(
+                None, None, test, args.batch_size, args.num_workers
+            )
+            
+            # Load precomputed model from checkpoint
+            checkpoint_path = f"models/cbm_tree/{MODEL_NAME}/best_model.pth"
+            
+            try:
+                model, optimizer, scheduler, epoch, best_vloss, best_vacc = create_precomputed_model_from_checkpoint(
+                    checkpoint_path, device=device
+                )
+                logger.info(f"Loaded precomputed model from epoch {epoch}")
+                logger.info(f"Best validation loss: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
+            except FileNotFoundError:
+                logger.error(f"No saved model found for {MODEL_NAME}")
+                logger.error(f"Expected path: {checkpoint_path}")
+                sys.exit(1)
+            except ValueError as e:
+                logger.error(f"Error: {e}")
+                sys.exit(1)
+            except Exception as e:
+                logger.error(f"Error loading model: {e}")
+                sys.exit(1)
+        else:
+            # Load data normally
+            _, _, test = load_dataset(
+                train_subset=args.train_subset,
+                full_test_set=args.full_test_set,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
+                subtask=args.subtask
+            )
+            
+            # Tokenize
+            tokenizer = load_tokenizer(args.backbone_type)
+            _, _, test = tokenize_datasets(None, None, test, tokenizer, args.max_length)
+            
+            # Create dataloader
+            _, _, test_dataloader = create_dataloaders(None, None, test, args.batch_size, args.num_workers)
+            
+            # Load model directly from checkpoint
+            checkpoint_path = f"models/cbm_tree/{MODEL_NAME}/best_model.pth"
+            
+            try:
+                model, optimizer, scheduler, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
+                    checkpoint_path, device=device
+                )
+                logger.info(f"Loaded model from epoch {epoch}")
+                logger.info(f"Best validation loss: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
+            except FileNotFoundError:
+                logger.error(f"No saved model found for {MODEL_NAME}")
+                logger.error(f"Expected path: {checkpoint_path}")
+                sys.exit(1)
+            except ValueError as e:
+                logger.error(f"Error: {e}")
+                logger.error("This checkpoint was saved with an older version that doesn't include architecture information.")
+                sys.exit(1)
+            except Exception as e:
+                logger.error(f"Error loading model: {e}")
+                sys.exit(1)
         
         # Evaluate on test set
         criterion = torch.nn.CrossEntropyLoss()
@@ -126,12 +172,20 @@ if __name__ == "__main__":
         analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
         
         # Perform evaluation with optional misclassification analysis
-        test_results = evaluate_model(
-            model, test_dataloader, criterion, metrics, device,
-            perform_analysis=args.enable_misclassification_analysis,
-            analysis_dir=analysis_dir,
-            model_name=MODEL_NAME
-        )
+        if use_precomputed:
+            test_results = evaluate_model_precomputed(
+                model, test_dataloader, criterion, metrics, device,
+                perform_analysis=args.enable_misclassification_analysis,
+                analysis_dir=analysis_dir,
+                model_name=MODEL_NAME
+            )
+        else:
+            test_results = evaluate_model(
+                model, test_dataloader, criterion, metrics, device,
+                perform_analysis=args.enable_misclassification_analysis,
+                analysis_dir=analysis_dir,
+                model_name=MODEL_NAME
+            )
         
         # Handle the case where analysis might be returned
         if isinstance(test_results, tuple):
@@ -322,26 +376,48 @@ if __name__ == "__main__":
         elif args.train:
             logger.info("Training model...")
             
-            # Load data
-            train, val, test = load_dataset(
-                train_subset=args.train_subset,
-                full_test_set=False,
-                val_ratio=args.val_ratio,
-                test_ratio=args.test_ratio,
-                subtask=args.subtask
-            )
+            # Check if using precomputed embeddings
+            use_precomputed = args.precomputed is not None
             
-            # Tokenize
-            train, val, test = tokenize_datasets(train, val, test, tokenizer, args.max_length)
-            
-            # Create dataloaders
-            train_dataloader, val_dataloader, test_dataloader = create_dataloaders(
-                train, val, test, args.batch_size, args.num_workers
-            )
+            if use_precomputed:
+                logger.info(f"Using precomputed embeddings from: {args.precomputed}")
+                # Load precomputed data
+                train, val, test = load_precomputed_dataset(
+                    embeddings_path=args.precomputed,
+                    train_subset=args.train_subset,
+                    full_test_set=False,
+                    val_ratio=args.val_ratio,
+                    test_ratio=args.test_ratio
+                )
+                
+                # Create dataloaders for precomputed embeddings
+                train_dataloader, val_dataloader, test_dataloader = create_precomputed_dataloaders(
+                    train, val, test, args.batch_size, args.num_workers
+                )
+            else:
+                # Load data normally
+                train, val, test = load_dataset(
+                    train_subset=args.train_subset,
+                    full_test_set=False,
+                    val_ratio=args.val_ratio,
+                    test_ratio=args.test_ratio,
+                    subtask=args.subtask
+                )
+                
+                # Tokenize
+                train, val, test = tokenize_datasets(train, val, test, tokenizer, args.max_length)
+                
+                # Create dataloaders
+                train_dataloader, val_dataloader, test_dataloader = create_dataloaders(
+                    train, val, test, args.batch_size, args.num_workers
+                )
             
             if args.use_best_params:
                 # Load best parameters from Optuna study
                 logger.info("Loading best hyperparameters from Optuna study...")
+                if use_precomputed:
+                    logger.error("--use-best-params is not supported with --precomputed mode yet")
+                    sys.exit(1)
                 model, optimizer, scheduler, best_params = create_model_with_optuna_params(
                     args.storage_url, args.study_name, MODEL_NAME,
                     backbone_type=args.backbone_type, device=device
@@ -350,17 +426,32 @@ if __name__ == "__main__":
             else:
                 # Use default or command-line parameters
                 logger.info("Using default/command-line hyperparameters...")
-                embedding_dim = 768 if args.backbone_type == "codebert" else 2048
-                model = CBMStarCoderTree(
-                    backbone_type=args.backbone_type,
-                    embedding_dim=embedding_dim,
-                    filter_sizes=args.filter_sizes,
-                    lstm_hidden_dim=args.lstm_hidden_dim,
-                    num_classes=2,
-                    dropout_rate=args.dropout_rate,
-                    freeze_backbone=args.freeze_backbone,
-                    tree_feature_projection_dim=args.tree_feature_projection_dim
-                ).to(device)
+                if use_precomputed:
+                    # Get embedding dimension from dataset
+                    sample_embedding = train[0]['embedding']
+                    embedding_dim = len(sample_embedding)
+                    logger.info(f"Detected embedding dimension: {embedding_dim}")
+                    
+                    model = CBMPrecomputed(
+                        embedding_dim=embedding_dim,
+                        filter_sizes=args.filter_sizes,
+                        lstm_hidden_dim=args.lstm_hidden_dim,
+                        num_classes=2,
+                        dropout_rate=args.dropout_rate,
+                        tree_feature_projection_dim=args.tree_feature_projection_dim
+                    ).to(device)
+                else:
+                    embedding_dim = 768 if args.backbone_type == "codebert" else 2048
+                    model = CBMStarCoderTree(
+                        backbone_type=args.backbone_type,
+                        embedding_dim=embedding_dim,
+                        filter_sizes=args.filter_sizes,
+                        lstm_hidden_dim=args.lstm_hidden_dim,
+                        num_classes=2,
+                        dropout_rate=args.dropout_rate,
+                        freeze_backbone=args.freeze_backbone,
+                        tree_feature_projection_dim=args.tree_feature_projection_dim
+                    ).to(device)
                 
                 optimizer = torch.optim.AdamW(
                     model.parameters(),
@@ -376,30 +467,52 @@ if __name__ == "__main__":
             metrics = get_metrics(device)
             
             # Train the model
-            model = train_model(
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                criterion=criterion,
-                train_dataloader=train_dataloader,
-                val_dataloader=val_dataloader,
-                metrics=metrics,
-                device=device,
-                epochs=args.epochs,
-                patience=args.patience,
-                gradient_clip=gradient_clip,
-                log_interval=args.log_interval,
-                save_path="models/cbm_tree",
-                model_name=MODEL_NAME,
-                writer=writer
-            )
+            if use_precomputed:
+                model = train_model_precomputed(
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    criterion=criterion,
+                    train_dataloader=train_dataloader,
+                    val_dataloader=val_dataloader,
+                    metrics=metrics,
+                    device=device,
+                    epochs=args.epochs,
+                    patience=args.patience,
+                    gradient_clip=gradient_clip,
+                    log_interval=args.log_interval,
+                    save_path="models/cbm_tree",
+                    model_name=MODEL_NAME,
+                    writer=writer
+                )
+            else:
+                model = train_model(
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    criterion=criterion,
+                    train_dataloader=train_dataloader,
+                    val_dataloader=val_dataloader,
+                    metrics=metrics,
+                    device=device,
+                    epochs=args.epochs,
+                    patience=args.patience,
+                    gradient_clip=gradient_clip,
+                    log_interval=args.log_interval,
+                    save_path="models/cbm_tree",
+                    model_name=MODEL_NAME,
+                    writer=writer
+                )
 
             # Clean up RAM
             del train, val
             gc.collect()
 
             # Final evaluation on test set
-            test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+            if use_precomputed:
+                test_results = evaluate_model_precomputed(model, test_dataloader, criterion, metrics, device)
+            else:
+                test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
             
             # Handle the case where analysis might be returned
             if isinstance(test_results, tuple):

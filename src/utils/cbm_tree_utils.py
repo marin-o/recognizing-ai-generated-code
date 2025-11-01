@@ -19,7 +19,9 @@ from typing import Tuple, Optional, Dict, Any, List
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data.dataset.semeval2026_task13 import SemEval2026Task13
+from data.dataset.semeval_precomputed import SemEvalPrecomputed
 from models.cbm_starcoder_tree import CBMStarCoderTree, load_tokenizer
+from models.cbm_precomputed import CBMPrecomputed
 
 logger = logging.getLogger(__name__)
 
@@ -571,3 +573,330 @@ def create_model_with_optuna_params(
             return model, optimizer, scheduler, {}
         else:
             raise
+
+
+# ============================================================================
+# Precomputed Embeddings Functions
+# ============================================================================
+
+def load_precomputed_dataset(
+    embeddings_path: str,
+    train_subset: float = 0.1,
+    full_test_set: bool = False,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.2
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Load dataset with precomputed embeddings.
+    
+    Args:
+        embeddings_path: Path to precomputed embeddings directory
+        train_subset: Fraction of training data to use
+        full_test_set: Whether to use the full test set
+        val_ratio: Validation set ratio
+        test_ratio: Test set ratio
+        
+    Returns:
+        Tuple of (train, val, test) datasets
+    """
+    logger.info(f"Loading precomputed embeddings from {embeddings_path}")
+    
+    dataset_loader = SemEvalPrecomputed(embeddings_path)
+    
+    # Load train, validation, and test splits
+    train, val, test = dataset_loader.get_dataset(
+        split=['train', 'val', 'test'],
+        train_subset=train_subset,
+        dynamic_split_sizing=True,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio if not full_test_set else 1.0
+    )
+    
+    logger.info(f"Dataset loaded - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
+    logger.info(f"Val ratio: {val_ratio:.1%}, Test ratio: {test_ratio if not full_test_set else 1.0:.1%}")
+    
+    return train, val, test  # type: ignore
+
+
+def create_precomputed_dataloaders(train, val, test, batch_size=16, num_workers=4):
+    """
+    Create DataLoaders for precomputed embeddings datasets.
+    
+    Args:
+        train, val, test: Datasets with precomputed embeddings
+        batch_size: Batch size
+        num_workers: Number of worker processes
+        
+    Returns:
+        Tuple of (train_dataloader, val_dataloader, test_dataloader)
+    """
+    
+    def collate_fn(batch):
+        """Custom collate function for precomputed embeddings"""
+        embeddings = torch.stack([torch.tensor(item['embedding']) for item in batch])
+        labels = torch.tensor([item['target_binary'] for item in batch])
+        
+        # Extract raw code and language for tree feature extraction
+        codes = [item['code'] for item in batch]
+        languages = [item.get('language', 'python') for item in batch]
+        
+        return {
+            'embeddings': embeddings,
+            'labels': labels,
+            'codes': codes,
+            'languages': languages
+        }
+    
+    train_dataloader = DataLoader(
+        train, batch_size=batch_size, shuffle=True, num_workers=num_workers,
+        pin_memory=True, collate_fn=collate_fn
+    ) if train is not None else None
+    
+    val_dataloader = DataLoader(
+        val, batch_size=batch_size, num_workers=num_workers,
+        pin_memory=True, collate_fn=collate_fn
+    ) if val is not None else None
+    
+    test_dataloader = DataLoader(
+        test, batch_size=batch_size, num_workers=num_workers,
+        pin_memory=True, collate_fn=collate_fn
+    ) if test is not None else None
+    
+    return train_dataloader, val_dataloader, test_dataloader
+
+
+def train_one_epoch_precomputed(model, train_dataloader, optimizer, criterion, device,
+                                gradient_clip=1.0, log_interval=50, overall_progress=None):
+    """Train for one epoch using precomputed embeddings"""
+    model.train()
+    running_loss = 0.0
+    total_batches = len(train_dataloader)
+
+    for i, data in enumerate(train_dataloader):
+        embeddings = data['embeddings'].to(device)
+        labels = data['labels'].to(device)
+        codes = data['codes']
+        languages = data['languages']
+        
+        # Zero gradients
+        optimizer.zero_grad()
+        
+        # Forward pass with precomputed embeddings and tree features
+        outputs = model(embeddings, codes=codes, languages=languages)
+        loss = criterion(outputs, labels)
+        
+        # Backward pass
+        loss.backward()
+        
+        # Gradient clipping
+        if gradient_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+        
+        optimizer.step()
+        
+        running_loss += loss.item()
+        
+        # Update progress bar
+        if overall_progress is not None:
+            overall_progress.update(1)
+            if (i + 1) % log_interval == 0:
+                avg_loss = running_loss / (i + 1)
+                overall_progress.set_postfix({"batch_loss": f"{avg_loss:.4f}"})
+
+    avg_loss = running_loss / total_batches if total_batches > 0 else 0
+    return avg_loss
+
+
+def evaluate_model_precomputed(model, dataloader, criterion, metrics, device,
+                               perform_analysis=False, analysis_dir=None, model_name="CBMPrecomputed"):
+    """Evaluate model with precomputed embeddings"""
+    model.eval()
+
+    # Reset metrics
+    for metric in metrics.values():
+        metric.reset()
+
+    running_loss = 0.0
+    all_predictions = []
+    all_labels = []
+
+    with torch.no_grad():
+        for data in tqdm(dataloader, desc="Evaluating", leave=False):
+            embeddings = data['embeddings'].to(device)
+            labels = data['labels'].to(device)
+            codes = data['codes']
+            languages = data['languages']
+            
+            # Forward pass with precomputed embeddings and tree features
+            outputs = model(embeddings, codes=codes, languages=languages)
+            loss = criterion(outputs, labels)
+            running_loss += loss.item()
+            
+            # Get predictions
+            preds = torch.argmax(outputs, dim=1)
+            
+            # Store for analysis
+            all_predictions.append(preds)
+            all_labels.append(labels)
+            
+            # Update metrics
+            for metric in metrics.values():
+                if isinstance(metric, AUROC):
+                    probs = torch.softmax(outputs, dim=1)[:, 1]
+                    metric.update(probs, labels)
+                else:
+                    metric.update(preds, labels)
+
+    all_predictions = torch.cat(all_predictions)
+    all_labels = torch.cat(all_labels)
+
+    # Compute metrics
+    results = {}
+    for name, metric in metrics.items():
+        results[name] = metric.compute().item()
+    
+    avg_loss = running_loss / len(dataloader) if len(dataloader) > 0 else 0
+    results['loss'] = avg_loss
+    
+    return results
+
+
+def train_model_precomputed(model, optimizer, scheduler, criterion, train_dataloader, val_dataloader,
+                           metrics, device, epochs, patience=5, gradient_clip=1.0, log_interval=50,
+                           save_path="models/cbm_tree", model_name="cbm_tree_precomputed", writer=None,
+                           initial_best_vloss=None, initial_best_vacc=None, start_epoch=0):
+    """Train the model with precomputed embeddings"""
+    best_vloss = initial_best_vloss if initial_best_vloss is not None else float("inf")
+    best_vacc = initial_best_vacc if initial_best_vacc is not None else 0.0
+    patience_counter = 0
+
+    total_steps = epochs * len(train_dataloader)
+    overall_progress = tqdm(total=total_steps, desc="Training Progress", position=0)
+
+    for epoch in range(epochs):
+        logger.info(f"Epoch {start_epoch + epoch + 1}/{start_epoch + epochs}")
+        
+        # Training phase
+        train_loss = train_one_epoch_precomputed(
+            model, train_dataloader, optimizer, criterion, device,
+            gradient_clip, log_interval, overall_progress
+        )
+        
+        # Validation phase
+        val_results = evaluate_model_precomputed(model, val_dataloader, criterion, metrics, device)
+        val_loss = val_results['loss']
+        val_acc = val_results['accuracy']
+        
+        # Log to tensorboard
+        if writer is not None:
+            writer.add_scalar("loss/train", train_loss, start_epoch + epoch)
+            writer.add_scalar("loss/val", val_loss, start_epoch + epoch)
+            for metric_name, metric_value in val_results.items():
+                if metric_name != 'loss':
+                    writer.add_scalar(f"val/{metric_name}", metric_value, start_epoch + epoch)
+        
+        # Learning rate scheduling
+        if scheduler is not None:
+            if isinstance(scheduler, StepLR):
+                scheduler.step()
+            elif isinstance(scheduler, CosineAnnealingLR):
+                scheduler.step()
+        
+        # Log epoch results
+        logger.info(f"Train Loss: {train_loss:.5f}")
+        logger.info(f"Val Loss: {val_loss:.5f}")
+        for metric_name, metric_value in val_results.items():
+            if metric_name != 'loss':
+                logger.info(f"Val {metric_name.capitalize()}: {metric_value:.6f}")
+        
+        # Early stopping and model saving
+        if val_loss < best_vloss or val_acc > best_vacc:
+            if val_loss < best_vloss:
+                best_vloss = val_loss
+                logger.info(f"New best validation loss: {best_vloss:.5f}")
+            if val_acc > best_vacc:
+                best_vacc = val_acc
+                logger.info(f"New best validation accuracy: {best_vacc:.6f}")
+            
+            # Save model with configuration
+            model_config = {
+                'embedding_dim': model.embedding_dim,
+                'filter_sizes': model.filter_sizes,
+                'lstm_hidden_dim': model.lstm_hidden_dim,
+                'num_classes': model.num_classes,
+                'dropout_rate': model.dropout_rate,
+                'tree_feature_projection_dim': model.tree_feature_projection_dim,
+                'is_precomputed': True  # Flag to identify this as precomputed model
+            }
+            
+            save_model_checkpoint(
+                model, optimizer, scheduler, start_epoch + epoch,
+                best_vloss, best_vacc, model_config, save_path, model_name
+            )
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            logger.info(f"No improvement. Patience: {patience_counter}/{patience}")
+        
+        if patience_counter >= patience:
+            logger.info(f"Early stopping triggered after {start_epoch + epoch + 1} epochs")
+            break
+
+    overall_progress.close()
+    
+    # Load best model
+    checkpoint_path = os.path.join(save_path, model_name, "best_model.pth")
+    load_model_checkpoint(checkpoint_path, model, optimizer, scheduler, device)
+    
+    return model
+
+
+def create_precomputed_model_from_checkpoint(checkpoint_path, device="auto"):
+    """Create precomputed model from checkpoint"""
+    device = get_device(device) if isinstance(device, str) else device
+    
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Check if this has model_config
+    if 'model_config' not in checkpoint:
+        raise ValueError("Checkpoint does not contain model_config. Cannot recreate model.")
+    
+    config = checkpoint['model_config']
+    
+    # Check if this is a precomputed model
+    if not config.get('is_precomputed', False):
+        raise ValueError("This checkpoint is not from a precomputed embeddings model.")
+    
+    # Create model
+    model = CBMPrecomputed(
+        embedding_dim=config['embedding_dim'],
+        filter_sizes=config['filter_sizes'],
+        lstm_hidden_dim=config['lstm_hidden_dim'],
+        num_classes=config['num_classes'],
+        dropout_rate=config['dropout_rate'],
+        tree_feature_projection_dim=config['tree_feature_projection_dim']
+    ).to(device)
+    
+    # Load state dict
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Create optimizer and scheduler
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    scheduler = None
+    if 'scheduler_state_dict' in checkpoint:
+        scheduler = CosineAnnealingLR(optimizer, T_max=10)
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    
+    epoch = checkpoint['epoch']
+    best_vloss = checkpoint['best_vloss']
+    best_vacc = checkpoint['best_vacc']
+    
+    logger.info(f"Precomputed model recreated from checkpoint")
+    logger.info(f"Configuration: {config}")
+    
+    return model, optimizer, scheduler, epoch, best_vloss, best_vacc
