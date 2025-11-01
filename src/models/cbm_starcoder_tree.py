@@ -102,7 +102,6 @@ class CBMStarCoderTree(nn.Module):
             self.backbone = AutoModel.from_pretrained(
                 self.model_name,
                 trust_remote_code=True,
-                load_in_4bit=True,  # ← 4-bit quant
                 quantization_config=BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_compute_dtype=torch.bfloat16,
