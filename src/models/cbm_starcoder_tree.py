@@ -108,7 +108,7 @@ class CBMStarCoderTree(nn.Module):
                     bnb_4bit_use_double_quant=True,
                     bnb_4bit_quant_type="nf4",
                 ),
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
             )
 
         # Get actual embedding dimension from model
