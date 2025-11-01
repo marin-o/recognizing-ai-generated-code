@@ -127,8 +127,9 @@ def generate_embeddings_for_split(
         # Generate embeddings
         with torch.no_grad():
             outputs = model(**inputs)
-            # Extract CLS token (first token)
             cls_embeddings = outputs.last_hidden_state[:, 0, :].cpu()
+            if cls_embeddings.dtype == torch.bfloat16:
+                cls_embeddings = cls_embeddings.float()
             embeddings_list.extend(cls_embeddings.numpy().tolist())
     
     # Add embeddings to dataset
