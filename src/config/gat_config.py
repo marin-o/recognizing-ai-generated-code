@@ -242,6 +242,11 @@ Command-specific help:
         action="store_true",
         help="Use best hyperparameters from Optuna study (only for --train mode)"
     )
+    model_group.add_argument(
+        "--use-two-layer-classifier",
+        action="store_true",
+        help="Use two-layer classifier instead of single layer (default: False for backward compatibility)"
+    )
     
     # Training parameters
     train_group = parser.add_argument_group("Training Parameters")
@@ -334,6 +339,17 @@ Command-specific help:
         "--disable-tensorboard",
         action="store_true",
         help="Disable tensorboard logging"
+    )
+    logging_group.add_argument(
+        "--enable-misclassification-analysis",
+        action="store_true",
+        help="Enable detailed misclassification analysis during evaluation (creates plots and statistics)"
+    )
+    logging_group.add_argument(
+        "--analysis-dir",
+        type=str,
+        default="analysis",
+        help="Directory to save misclassification analysis results"
     )
     
     args = parser.parse_args()

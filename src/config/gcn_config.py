@@ -259,6 +259,16 @@ Command-specific help:
         default=None,
         help="Source model name for loading best parameters (use with --use-best-params). If not specified, uses --model-name"
     )
+    model_group.add_argument(
+        "--force-two-layer-classifier",
+        action="store_true",
+        help="Force use of two-layer classifier even when loading params from single-layer study"
+    )
+    model_group.add_argument(
+        "--use-two-layer-classifier",
+        action="store_true",
+        help="Use two-layer classifier instead of single layer (default: False for backward compatibility)"
+    )
     
     # Training parameters
     train_group = parser.add_argument_group("Training Parameters")
@@ -351,6 +361,17 @@ Command-specific help:
         "--disable-tensorboard",
         action="store_true",
         help="Disable tensorboard logging"
+    )
+    logging_group.add_argument(
+        "--enable-misclassification-analysis",
+        action="store_true",
+        help="Enable detailed misclassification analysis during evaluation (creates plots and statistics)"
+    )
+    logging_group.add_argument(
+        "--analysis-dir",
+        type=str,
+        default="analysis",
+        help="Directory to save misclassification analysis results"
     )
     
     args = parser.parse_args()

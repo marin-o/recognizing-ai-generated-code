@@ -87,7 +87,23 @@ if __name__ == "__main__":
         # Evaluate on test set
         criterion = torch.nn.BCEWithLogitsLoss()
         metrics = get_metrics()
-        test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+        
+        # Create analysis directory if analysis is enabled
+        analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+        
+        # Perform evaluation with optional misclassification analysis
+        test_results = evaluate(
+            model, test_dataloader, criterion, metrics, 
+            perform_analysis=args.enable_misclassification_analysis, 
+            analysis_dir=analysis_dir, 
+            model_name=MODEL_NAME
+        )
+        
+        if len(test_results) == 3:
+            test_loss, test_metrics, analysis_results = test_results
+        else:
+            test_loss, test_metrics = test_results
+            analysis_results = None
 
         # Log evaluation results to tensorboard
         if writer is not None:
@@ -162,7 +178,8 @@ if __name__ == "__main__":
                     study_name=args.study_name,
                     model_name=MODEL_NAME,
                     use_default_on_failure=False,  # Don't fallback to defaults in training mode
-                    source_study_name=args.source_model_name  # Use source model name if provided
+                    source_study_name=args.source_model_name,  # Use source model name if provided
+                    override_two_layer_classifier=True if args.force_two_layer_classifier else None
                 )
                 
                 if not optuna_success:
@@ -180,6 +197,7 @@ if __name__ == "__main__":
                 # Use default model architecture
                 model = GCN(
                     train_loader.dataset.num_node_features,
+                    use_two_layer_classifier=args.use_two_layer_classifier,
                 ).to(DEVICE)
 
                 optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -221,7 +239,23 @@ if __name__ == "__main__":
             epoch, best_vloss, best_vacc = load_model(
                 model, optimizer, save_path="models/gnn", scheduler=scheduler
             )
-            test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+            
+            # Create analysis directory if analysis is enabled
+            analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+            
+            # Perform evaluation with optional misclassification analysis
+            test_results = evaluate(
+                model, test_dataloader, criterion, metrics, 
+                perform_analysis=args.enable_misclassification_analysis, 
+                analysis_dir=analysis_dir, 
+                model_name=MODEL_NAME
+            )
+            
+            if len(test_results) == 3:
+                test_loss, test_metrics, analysis_results = test_results
+            else:
+                test_loss, test_metrics = test_results
+                analysis_results = None
 
             # Log final test results
             if writer is not None:
@@ -305,7 +339,23 @@ if __name__ == "__main__":
             epoch, best_vloss, best_vacc = load_model(
                 model, optimizer, save_path="models/gnn", scheduler=scheduler
             )
-            test_loss, test_metrics = evaluate(model, test_dataloader, criterion, metrics)
+            
+            # Create analysis directory if analysis is enabled
+            analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+            
+            # Perform evaluation with optional misclassification analysis
+            test_results = evaluate(
+                model, test_dataloader, criterion, metrics, 
+                perform_analysis=args.enable_misclassification_analysis, 
+                analysis_dir=analysis_dir, 
+                model_name=MODEL_NAME
+            )
+            
+            if len(test_results) == 3:
+                test_loss, test_metrics, analysis_results = test_results
+            else:
+                test_loss, test_metrics = test_results
+                analysis_results = None
 
             # Log resumed training final test results
             if writer is not None:

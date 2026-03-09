@@ -67,7 +67,9 @@ if __name__ == "__main__":
             val_ratio=args.val_ratio,
             test_ratio=args.test_ratio,
             use_cleaned=args.use_cleaned,
-            cleaned_data_path=args.cleaned_data_path
+            cleaned_data_path=args.cleaned_data_path,
+            dataset_type=args.dataset_type,
+            subtask=args.subtask
         )
         
         # Tokenize
@@ -82,7 +84,7 @@ if __name__ == "__main__":
         
         try:
             model, optimizer, scheduler, epoch, best_vloss, best_vacc = create_model_from_checkpoint(
-                checkpoint_path, device=device
+                checkpoint_path, device=device  # type: ignore
             )
             logger.info(f"Loaded model from epoch {epoch}")
             logger.info(f"Best validation loss: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
@@ -101,7 +103,23 @@ if __name__ == "__main__":
         # Evaluate on test set
         criterion = torch.nn.CrossEntropyLoss()
         metrics = get_metrics(device)
-        test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+        
+        # Create analysis directory if analysis is enabled
+        analysis_dir = os.path.join(args.analysis_dir, MODEL_NAME) if args.enable_misclassification_analysis else None
+        
+        # Perform evaluation with optional misclassification analysis
+        test_results = evaluate_model(
+            model, test_dataloader, criterion, metrics, device,
+            perform_analysis=args.enable_misclassification_analysis,
+            analysis_dir=analysis_dir,
+            model_name=MODEL_NAME
+        )
+        
+        # Handle the case where analysis might be returned
+        if isinstance(test_results, tuple):
+            test_results, analysis_results = test_results
+        else:
+            analysis_results = None
 
         # Log evaluation results to tensorboard
         if writer is not None:
@@ -148,7 +166,9 @@ if __name__ == "__main__":
                     val_ratio=args.val_ratio,
                     test_ratio=args.test_ratio,
                     use_cleaned=args.use_cleaned,
-                    cleaned_data_path=args.cleaned_data_path
+                    cleaned_data_path=args.cleaned_data_path,
+                    dataset_type=args.dataset_type,
+                    subtask=args.subtask
                 )
                 
                 trial_train, trial_val, _ = tokenize_datasets(
@@ -212,6 +232,9 @@ if __name__ == "__main__":
                     
                     # Validation
                     val_results = evaluate_model(model, trial_val_loader, criterion, metrics, device)
+                    # Handle the case where analysis might be returned
+                    if isinstance(val_results, tuple):
+                        val_results = val_results[0]  # Take only the metrics, ignore analysis
                     scheduler.step()
                     
                     current_f1 = val_results['f1']
@@ -294,7 +317,9 @@ if __name__ == "__main__":
                 val_ratio=args.val_ratio,
                 test_ratio=args.test_ratio,
                 use_cleaned=args.use_cleaned,
-                cleaned_data_path=args.cleaned_data_path
+                cleaned_data_path=args.cleaned_data_path,
+                dataset_type=args.dataset_type,
+                subtask=args.subtask
             )
             
             # Tokenize
@@ -312,7 +337,7 @@ if __name__ == "__main__":
                     study_name=args.study_name,
                     model_name=MODEL_NAME,
                     pretrained_model=args.pretrained_model,
-                    device=device,
+                    device=device,  # type: ignore
                     use_default_on_failure=False
                 )
                 
@@ -370,6 +395,9 @@ if __name__ == "__main__":
 
             # Final evaluation on test set
             test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+            # Handle the case where analysis might be returned
+            if isinstance(test_results, tuple):
+                test_results = test_results[0]  # Take only the metrics, ignore analysis
 
             # Log final test results
             if writer is not None:
@@ -399,7 +427,9 @@ if __name__ == "__main__":
                 val_ratio=args.val_ratio,
                 test_ratio=args.test_ratio,
                 use_cleaned=args.use_cleaned,
-                cleaned_data_path=args.cleaned_data_path
+                cleaned_data_path=args.cleaned_data_path,
+                dataset_type=args.dataset_type,
+                subtask=args.subtask
             )
             
             # Tokenize
@@ -415,7 +445,7 @@ if __name__ == "__main__":
             
             try:
                 model, optimizer, scheduler, start_epoch, best_vloss, best_vacc = create_model_from_checkpoint(
-                    checkpoint_path, device=device
+                    checkpoint_path, device=device  # type: ignore
                 )
                 logger.info(f"Resuming from epoch {start_epoch}")
                 logger.info(f"Best validation loss so far: {best_vloss:.4f}, Best validation accuracy: {best_vacc:.4f}")
@@ -467,6 +497,9 @@ if __name__ == "__main__":
 
             # Final evaluation on test set
             test_results = evaluate_model(model, test_dataloader, criterion, metrics, device)
+            # Handle the case where analysis might be returned
+            if isinstance(test_results, tuple):
+                test_results = test_results[0]  # Take only the metrics, ignore analysis
 
             # Log resumed training final test results
             if writer is not None:

@@ -13,6 +13,10 @@ import logging
 import optuna
 from transformers import RobertaModel
 from datasets import Dataset
+from typing import Tuple, Optional
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 from data.dataset.codet_m4 import CoDeTM4
 from models.cbmclassifier import CBMClassifier
@@ -184,7 +188,7 @@ def train_one_epoch(model, train_dataloader, optimizer, criterion, device,
     avg_loss = running_loss / total_batches if total_batches > 0 else 0
     return avg_loss
 
-def evaluate_model(model, dataloader, criterion, metrics, device):
+def evaluate_model(model, dataloader, criterion, metrics, device, perform_analysis=False, analysis_dir=None, model_name="CBM"):
     """Evaluate model on a dataset"""
     model.eval()
 
@@ -228,6 +232,14 @@ def evaluate_model(model, dataloader, criterion, metrics, device):
     avg_loss = running_loss / len(dataloader) if len(dataloader) > 0 else 0
     results['loss'] = avg_loss
     
+    # Perform misclassification analysis if requested
+    if perform_analysis and analysis_dir is not None:
+        print("\nPerforming misclassification analysis...")
+        analysis_results = analyze_misclassified_samples(
+            model, dataloader, criterion, metrics, analysis_dir, model_name, device
+        )
+        return results, analysis_results
+    
     return results
 
 def train_model(model, optimizer, scheduler, criterion, train_dataloader, val_dataloader,
@@ -255,6 +267,10 @@ def train_model(model, optimizer, scheduler, criterion, train_dataloader, val_da
 
         # Validate
         val_results = evaluate_model(model, val_dataloader, criterion, metrics, device)
+        # Handle the case where analysis might be returned
+        if isinstance(val_results, tuple):
+            val_results = val_results[0]  # Take only the metrics, ignore analysis
+            
         logger.info(f"Validation loss: {val_results['loss']:.4f}")
         logger.info(f"Validation accuracy: {val_results['accuracy']:.4f}")
         logger.info(f"Validation F1: {val_results['f1']:.4f}")
@@ -494,100 +510,119 @@ def create_model_with_optuna_params(storage_url, study_name, model_name,
             raise e
 
 def load_dataset(cache_dir, train_subset=0.1, full_test_set=False, val_ratio=0.1, test_ratio=0.2, 
-                 use_cleaned=False, cleaned_data_path=None):
+                 use_cleaned=False, cleaned_data_path=None, dataset_type="codet", subtask="A") -> Tuple[Dataset, Dataset, Dataset]:
     """
-    Load the CoDeTM4 dataset with configurable validation and test ratios
+    Load the CoDeTM4 or SemEval dataset with configurable validation and test ratios
     
     Args:
-        cache_dir: Directory to cache the original dataset
+        cache_dir: Directory to cache the original dataset (CoDeTM4 only)
         train_subset: Fraction of training data to use
         full_test_set: Whether to use the full test set
         val_ratio: Validation set ratio
         test_ratio: Test set ratio
-        use_cleaned: Whether to use the cleaned dataset (duplicates removed)
-        cleaned_data_path: Path to cleaned dataset directory (auto-detected if None)
+        use_cleaned: Whether to use the cleaned dataset (CoDeTM4 only)
+        cleaned_data_path: Path to cleaned dataset directory (CoDeTM4 only)
+        dataset_type: Type of dataset to load ("codet" or "semeval")
+        subtask: Subtask for SemEval dataset ("A", "B", or "C")
     """
-    if use_cleaned:
-        # Try to import and use the cleaned dataset
-        try:
-            from data.dataset.codet_m4_cleaned import CoDeTM4Cleaned
-            
-            # Auto-detect cleaned data path if not provided
+    if dataset_type == "semeval":
+        # Load SemEval dataset
+        from data.dataset.semeval2026_task13 import SemEval2026Task13
+        dataset = SemEval2026Task13(subtask=subtask)
+        logger.info(f"Using SemEval 2026 Task 13 subtask {subtask}")
+        
+        if full_test_set:
+            # For evaluation, use full test set without downsampling
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=False,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+            logger.info(f"Using full test set with {len(test)} samples")
+        else:
+            # For training, use smaller subsets
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=True,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+        
+        dataset_type_str = f"semeval_{subtask}"
+        
+    elif dataset_type == "codet":
+        # Original CoDeTM4 loading logic
+        if use_cleaned:
+            # Try to use cleaned dataset first
             if cleaned_data_path is None:
-                # Look for the most recent cleaned dataset
-                import glob
-                possible_paths = glob.glob("data/codet_cleaned_*")
-                if possible_paths:
-                    cleaned_data_path = max(possible_paths)  # Get the most recent one
-                    logger.info(f"Auto-detected cleaned dataset: {cleaned_data_path}")
-                else:
-                    logger.warning("No cleaned dataset found, falling back to original dataset")
-                    use_cleaned = False
+                cleaned_data_path = use_cleaned_dataset_by_default()
             
-            if use_cleaned:
-                dataset = CoDeTM4Cleaned(cleaned_data_path=cleaned_data_path)
-                logger.info(f"Using cleaned dataset from: {cleaned_data_path}")
-                
-                # Get dataset info if available
+            if cleaned_data_path and os.path.exists(cleaned_data_path):
+                logger.info(f"Loading cleaned dataset from: {cleaned_data_path}")
                 try:
-                    info = dataset.get_info()
-                    if 'cleaning_metadata' in info:
-                        metadata = info['cleaning_metadata']
-                        logger.info(f"Cleaned dataset info:")
-                        logger.info(f"  Original sizes - Train: {metadata.get('original_sizes', {}).get('train', 'N/A')}, "
-                                  f"Val: {metadata.get('original_sizes', {}).get('val', 'N/A')}, "
-                                  f"Test: {metadata.get('original_sizes', {}).get('test', 'N/A')}")
-                        logger.info(f"  Cleaned sizes - Train: {metadata.get('cleaned_sizes', {}).get('train', 'N/A')}, "
-                                  f"Val: {metadata.get('cleaned_sizes', {}).get('val', 'N/A')}, "
-                                  f"Test: {metadata.get('cleaned_sizes', {}).get('test', 'N/A')}")
-                        logger.info(f"  Total samples removed: {sum(metadata.get('removed_counts', {}).values())}")
+                    from data.dataset.codet_m4_cleaned import CoDeTM4Cleaned
+                    dataset = CoDeTM4Cleaned(cleaned_data_path=cleaned_data_path)
+                    train, val, test = dataset.get_dataset(
+                        split=['train', 'val', 'test'], 
+                        columns=['code', 'target_binary'],
+                        train_subset=train_subset,
+                        dynamic_split_sizing=True,
+                        max_split_ratio=0.5,
+                        val_ratio=val_ratio,
+                        test_ratio=test_ratio
+                    )
+                    logger.info("Successfully loaded cleaned dataset")
                 except Exception as e:
-                    logger.debug(f"Could not load cleaning metadata: {e}")
-                    
-        except ImportError as e:
-            logger.warning(f"Could not import cleaned dataset class: {e}")
-            logger.info("Falling back to original dataset")
-            use_cleaned = False
-        except Exception as e:
-            logger.warning(f"Error loading cleaned dataset: {e}")
-            logger.info("Falling back to original dataset")
-            use_cleaned = False
+                    logger.warning(f"Failed to load cleaned dataset: {e}")
+                    logger.info("Falling back to original dataset")
+                    use_cleaned = False
+            else:
+                logger.warning("Cleaned dataset path not found, using original dataset")
+                use_cleaned = False
+        
+        # Use original dataset if not using cleaned or if cleaned failed
+        if not use_cleaned:
+            from data.dataset.codet_m4 import CoDeTM4
+            dataset = CoDeTM4(cache_dir=cache_dir)
+            logger.info(f"Using original dataset from cache: {cache_dir}")
+        
+        if full_test_set:
+            # For evaluation, use full test set without downsampling
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=False,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+            logger.info(f"Using full test set with {len(test)} samples")
+        else:
+            # For training, use smaller subsets
+            train, val, test = dataset.get_dataset(
+                split=['train', 'val', 'test'], 
+                columns=['code', 'target_binary'],
+                train_subset=train_subset,
+                dynamic_split_sizing=True,
+                max_split_ratio=0.5,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio
+            )
+        
+        dataset_type_str = "cleaned" if use_cleaned else "original"
     
-    # Use original dataset if not using cleaned or if cleaned failed
-    if not use_cleaned:
-        from data.dataset.codet_m4 import CoDeTM4
-        dataset = CoDeTM4(cache_dir=cache_dir)
-        logger.info(f"Using original dataset from cache: {cache_dir}")
-    
-    if full_test_set:
-        # For evaluation, use full test set without downsampling
-        train, val, test = dataset.get_dataset(
-            split=['train', 'val', 'test'], 
-            columns=['code', 'target_binary'],
-            train_subset=train_subset,
-            dynamic_split_sizing=False,
-            max_split_ratio=0.5,
-            val_ratio=val_ratio,
-            test_ratio=test_ratio
-        )
-        logger.info(f"Using full test set with {len(test)} samples")
-    else:
-        # For training, use smaller subsets
-        train, val, test = dataset.get_dataset(
-            split=['train', 'val', 'test'], 
-            columns=['code', 'target_binary'],
-            train_subset=train_subset,
-            dynamic_split_sizing=True,
-            max_split_ratio=0.5,
-            val_ratio=val_ratio,
-            test_ratio=test_ratio
-        )
-    
-    dataset_type = "cleaned" if use_cleaned else "original"
-    logger.info(f"Dataset loaded ({dataset_type}) - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
+    logger.info(f"Dataset loaded ({dataset_type_str}) - Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
     logger.info(f"Val ratio: {val_ratio:.1%}, Test ratio: {test_ratio:.1%}")
     
-    return train, val, test
+    return train, val, test  # type: ignore
 
 def get_available_cleaned_datasets():
     """Get list of available cleaned datasets"""
@@ -610,7 +645,7 @@ def get_available_cleaned_datasets():
                         metadata = json.load(f)
                     info['metadata'] = metadata
                     info['timestamp'] = metadata.get('cleaning_timestamp', 'Unknown')
-                    info['total_removed'] = sum(metadata.get('removed_counts', {}).values())
+                    info['total_removed'] = str(sum(metadata.get('removed_counts', {}).values()))
                 except Exception as e:
                     logger.debug(f"Could not load metadata for {path}: {e}")
             
@@ -634,7 +669,7 @@ def use_cleaned_dataset_by_default():
         return most_recent['path']
     return None
 
-def tokenize_datasets(train: Dataset, val: Dataset, test: Dataset, tokenizer, max_length):
+def tokenize_datasets(train: Optional[Dataset], val: Optional[Dataset], test: Optional[Dataset], tokenizer, max_length):
     """Tokenize train, validation, and test datasets"""
     tokenize = lambda x: tokenize_fn(tokenizer, x, max_length=max_length)
     logger.info("Tokenizing data...")
@@ -684,3 +719,241 @@ def create_dataloaders(train, val, test, batch_size=16, num_workers=4):
     ) if test is not None else None
     
     return train_dataloader, val_dataloader, test_dataloader
+
+
+def analyze_misclassified_samples(model, dataloader, criterion, metrics, analysis_dir="analysis", model_name="CBM", device=None):
+    """
+    Analyze misclassified samples and create visualizations of text length distributions.
+    
+    Args:
+        model: Trained CBM model
+        dataloader: DataLoader containing test samples
+        criterion: Loss function
+        metrics: Dictionary of evaluation metrics
+        analysis_dir: Directory to save analysis results
+        model_name: Name of the model for file naming
+        device: Device to run inference on
+        
+    Returns:
+        dict: Analysis results including misclassification counts and statistics
+    """
+    print("Starting misclassification analysis for CBM model...")
+    
+    # Determine device
+    if device is None:
+        device = next(model.parameters()).device
+    
+    # Create analysis directory
+    os.makedirs(analysis_dir, exist_ok=True)
+    
+    model.eval()
+    all_predictions = []
+    all_true_labels = []
+    all_text_lengths = []
+    all_probs = []
+    all_input_ids = []
+    
+    # Collect predictions and text information
+    with torch.no_grad():
+        for data in tqdm(dataloader, desc="Collecting predictions", leave=False):
+            input_ids = data["input_ids"].to(device)
+            attention_mask = data["attention_mask"].to(device)
+            labels = data["target_binary"].to(device)
+            inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+            
+            # Get model predictions
+            outputs = model(inputs)
+            probs = torch.softmax(outputs, dim=1)
+            predicted = torch.max(outputs, 1)[1]
+            
+            # Store results
+            all_predictions.extend(predicted.cpu().numpy())
+            all_true_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of positive class
+            
+            # Calculate text lengths (number of non-padding tokens)
+            for i, input_seq in enumerate(input_ids):
+                # Count non-padding tokens (assuming padding token is 1 for RoBERTa)
+                text_length = (input_seq != 1).sum().item()
+                all_text_lengths.append(text_length)
+                all_input_ids.append(input_seq.cpu().numpy())
+    
+    # Convert to numpy arrays
+    predictions = np.array(all_predictions)
+    true_labels = np.array(all_true_labels)
+    text_lengths = np.array(all_text_lengths)
+    probs = np.array(all_probs)
+    
+    # Identify misclassified samples
+    misclassified_mask = predictions != true_labels
+    correctly_classified_mask = predictions == true_labels
+    
+    # Get misclassified sample information
+    misclassified_lengths = text_lengths[misclassified_mask]
+    correctly_classified_lengths = text_lengths[correctly_classified_mask]
+    misclassified_true_labels = true_labels[misclassified_mask]
+    misclassified_predictions = predictions[misclassified_mask]
+    misclassified_probs = probs[misclassified_mask]
+    
+    # Calculate statistics
+    total_samples = len(predictions)
+    num_misclassified = np.sum(misclassified_mask)
+    misclassification_rate = num_misclassified / total_samples
+    
+    # False positives (predicted AI-generated, actually human)
+    false_positives = np.sum((predictions == 1) & (true_labels == 0))
+    # False negatives (predicted human, actually AI-generated)
+    false_negatives = np.sum((predictions == 0) & (true_labels == 1))
+    
+    print(f"Total samples: {total_samples}")
+    print(f"Misclassified samples: {num_misclassified}")
+    print(f"Misclassification rate: {misclassification_rate:.4f}")
+    print(f"False positives: {false_positives}")
+    print(f"False negatives: {false_negatives}")
+    
+    # Create analysis dataframe
+    analysis_data = {
+        'text_length': text_lengths,
+        'true_label': true_labels,
+        'prediction': predictions,
+        'probability': probs,
+        'misclassified': misclassified_mask
+    }
+    df = pd.DataFrame(analysis_data)
+    
+    # Save detailed results
+    results_file = os.path.join(analysis_dir, f"{model_name}_misclassification_analysis.csv")
+    df.to_csv(results_file, index=False)
+    print(f"Detailed analysis saved to: {results_file}")
+    
+    # Create visualizations
+    plt.style.use('default')
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle(f'{model_name} - Misclassification Analysis', fontsize=16, fontweight='bold')
+    
+    # 1. Text length distribution comparison
+    ax1 = axes[0, 0]
+    bins = np.linspace(0, max(text_lengths), 50)
+    ax1.hist(correctly_classified_lengths, bins=bins, alpha=0.7, label='Correctly Classified', 
+             color='green', density=True)
+    ax1.hist(misclassified_lengths, bins=bins, alpha=0.7, label='Misclassified', 
+             color='red', density=True)
+    ax1.set_xlabel('Text Length (Number of Tokens)')
+    ax1.set_ylabel('Density')
+    ax1.set_title('Text Length Distribution: Correct vs Misclassified')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Misclassification rate by text length bins
+    ax2 = axes[0, 1]
+    length_bins = np.percentile(text_lengths, [0, 25, 50, 75, 100])
+    length_labels = [f'{int(length_bins[i])}-{int(length_bins[i+1])}' for i in range(len(length_bins)-1)]
+    
+    misclass_rates = []
+    for i in range(len(length_bins)-1):
+        mask = (text_lengths >= length_bins[i]) & (text_lengths < length_bins[i+1])
+        if i == len(length_bins)-2:  # Last bin should include the maximum
+            mask = (text_lengths >= length_bins[i]) & (text_lengths <= length_bins[i+1])
+        
+        if np.sum(mask) > 0:
+            rate = np.sum(misclassified_mask[mask]) / np.sum(mask)
+            misclass_rates.append(rate)
+        else:
+            misclass_rates.append(0)
+    
+    bars = ax2.bar(length_labels, misclass_rates, color='coral', alpha=0.7)
+    ax2.set_xlabel('Text Length Quartiles')
+    ax2.set_ylabel('Misclassification Rate')
+    ax2.set_title('Misclassification Rate by Text Length')
+    ax2.set_ylim(0, max(misclass_rates) * 1.1 if misclass_rates else 1)
+    
+    # Add value labels on bars
+    for bar, rate in zip(bars, misclass_rates):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{rate:.3f}', ha='center', va='bottom')
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. False positive vs False negative analysis by length
+    ax3 = axes[1, 0]
+    fp_mask = (predictions == 1) & (true_labels == 0)
+    fn_mask = (predictions == 0) & (true_labels == 1)
+    
+    fp_lengths = text_lengths[fp_mask]
+    fn_lengths = text_lengths[fn_mask]
+    
+    ax3.hist(fp_lengths, bins=30, alpha=0.7, label=f'False Positives (n={len(fp_lengths)})', 
+             color='orange', density=True)
+    ax3.hist(fn_lengths, bins=30, alpha=0.7, label=f'False Negatives (n={len(fn_lengths)})', 
+             color='purple', density=True)
+    ax3.set_xlabel('Text Length (Number of Tokens)')
+    ax3.set_ylabel('Density')
+    ax3.set_title('Error Type Distribution by Text Length')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Confidence analysis for misclassified samples
+    ax4 = axes[1, 1]
+    
+    # Separate misclassified by true label
+    misclass_ai_mask = misclassified_mask & (true_labels == 1)  # AI samples misclassified as human
+    misclass_human_mask = misclassified_mask & (true_labels == 0)  # Human samples misclassified as AI
+    
+    if np.sum(misclass_ai_mask) > 0:
+        ax4.hist(probs[misclass_ai_mask], bins=20, alpha=0.7, 
+                label=f'AI→Human (n={np.sum(misclass_ai_mask)})', color='blue')
+    if np.sum(misclass_human_mask) > 0:
+        ax4.hist(probs[misclass_human_mask], bins=20, alpha=0.7, 
+                label=f'Human→AI (n={np.sum(misclass_human_mask)})', color='red')
+    
+    ax4.axvline(x=0.5, color='black', linestyle='--', alpha=0.5, label='Decision Threshold')
+    ax4.set_xlabel('Prediction Probability (AI class)')
+    ax4.set_ylabel('Frequency')
+    ax4.set_title('Prediction Confidence for Misclassified Samples')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    plot_file = os.path.join(analysis_dir, f"{model_name}_misclassification_analysis.png")
+    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+    print(f"Analysis plots saved to: {plot_file}")
+    
+    # Show the plot if in interactive mode
+    try:
+        plt.show()
+    except:
+        pass  # In case we're running in a non-interactive environment
+    finally:
+        plt.close()
+    
+    # Create summary statistics
+    summary_stats = {
+        'total_samples': total_samples,
+        'misclassified_samples': num_misclassified,
+        'misclassification_rate': misclassification_rate,
+        'false_positives': false_positives,
+        'false_negatives': false_negatives,
+        'avg_text_length_correct': np.mean(correctly_classified_lengths),
+        'avg_text_length_misclassified': np.mean(misclassified_lengths),
+        'std_text_length_correct': np.std(correctly_classified_lengths),
+        'std_text_length_misclassified': np.std(misclassified_lengths),
+        'median_text_length_correct': np.median(correctly_classified_lengths),
+        'median_text_length_misclassified': np.median(misclassified_lengths),
+    }
+    
+    # Save summary statistics
+    summary_file = os.path.join(analysis_dir, f"{model_name}_misclassification_summary.txt")
+    with open(summary_file, 'w') as f:
+        f.write(f"Misclassification Analysis Summary for {model_name}\n")
+        f.write("=" * 50 + "\n\n")
+        for key, value in summary_stats.items():
+            if isinstance(value, float):
+                f.write(f"{key}: {value:.6f}\n")
+            else:
+                f.write(f"{key}: {value}\n")
+    
+    print(f"Summary statistics saved to: {summary_file}")
+    print("\nMisclassification analysis completed!")
+    
+    return summary_stats

@@ -6,7 +6,7 @@ from torch_geometric.data import Data
 
 
 class GAT(nn.Module):
-    def __init__(self, num_node_features, embedding_dim=256, hidden_dim_1=128, hidden_dim_2=64, heads=4, dropout=0.6):
+    def __init__(self, num_node_features, embedding_dim=256, hidden_dim_1=128, hidden_dim_2=64, heads=4, dropout=0.6, use_two_layer_classifier=False):
         super().__init__()
         self.emb = nn.Embedding(num_embeddings=num_node_features, embedding_dim=embedding_dim)
         
@@ -29,7 +29,21 @@ class GAT(nn.Module):
         )
 
         self.pooling = global_mean_pool
-        self.classifier = nn.Linear(hidden_dim_2, 1)
+        
+        # Classifier layers - single or double based on use_two_layer_classifier
+        self.use_two_layer_classifier = use_two_layer_classifier
+        if use_two_layer_classifier:
+            # First classifier layer: input_dim -> hidden_dim_2 // 2
+            classifier_hidden_dim = hidden_dim_2 // 2
+            self.classifier = nn.Sequential(
+                nn.Linear(hidden_dim_2, classifier_hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(classifier_hidden_dim, 1)
+            )
+        else:
+            # Single classifier layer (backward compatible)
+            self.classifier = nn.Linear(hidden_dim_2, 1)
         
         # Store configuration for saving/loading
         self.embedding_dim = embedding_dim
@@ -109,3 +123,27 @@ if __name__ == "__main__":
         print(f"Batch output: {output_batch.shape}")
     
     print("GAT model test completed successfully!")
+
+    # Test the new two-layer classifier option
+    print("\nTesting GAT two-layer classifier...")
+    model_2layer = GAT(
+        num_node_features=vocab_size, 
+        embedding_dim=128, 
+        hidden_dim_1=64, 
+        hidden_dim_2=32,
+        heads=4,
+        dropout=0.6,
+        use_two_layer_classifier=True
+    )
+    
+    total_params_2layer = sum(p.numel() for p in model_2layer.parameters())
+    print(f"Two-layer classifier parameters: {total_params_2layer:,}")
+    
+    # Test forward pass with two-layer classifier
+    model_2layer.eval()
+    with torch.no_grad():
+        output_2layer = model_2layer(x=data.x, edge_index=data.edge_index, batch=data.batch)
+        print(f"Two-layer classifier output shape: {output_2layer.shape}")
+        print(f"Two-layer classifier output sample: {output_2layer.squeeze().item():.4f}")
+    
+    print("GAT two-layer classifier test completed successfully!")
