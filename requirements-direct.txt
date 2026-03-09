@@ -1,0 +1,25 @@
+--index-url https://download.pytorch.org/whl/cu128
+torch==2.7.1
+torch-geometric
+torchmetrics
+transformers
+datasets
+tqdm
+optuna
+numpy
+pandas
+scikit-learn
+scipy
+matplotlib
+seaborn
+networkx
+tree-sitter
+tree-sitter-python
+tree-sitter-cpp
+tree-sitter-java
+mlflow
+python-Levenshtein
+h5py
+tensorboard
+bitsandbytes
+ipykernel

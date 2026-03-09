@@ -1,3 +1,5 @@
+.venv-clean/
+
 # Data folder
 /data/ 
 !/data/aigcodeset_perturbations_levenshtein.json
