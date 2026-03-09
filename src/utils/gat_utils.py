@@ -225,7 +225,7 @@ def create_model_from_checkpoint(checkpoint_path, model_name=None):
     
     return model, optimizer, scheduler, checkpoint['epoch'], checkpoint['best_vloss'], checkpoint['best_vacc']
 
-def set_seed(seed=42):
+def set_seed(seed=872002):
     """Set seeds for reproducibility"""
     random.seed(seed)
     np.random.seed(seed)

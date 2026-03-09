@@ -447,7 +447,7 @@ def hyperparameter_search(args, dataset, tokenizer, device):
     
     study = optuna.create_study(
         direction="maximize",
-        sampler=TPESampler(seed=42),
+        sampler=TPESampler(seed=872002),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=3)
     )
     

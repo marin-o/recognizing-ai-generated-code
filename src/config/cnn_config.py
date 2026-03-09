@@ -29,7 +29,7 @@ Key Options:
   --learning-rate RATE     Learning rate for optimizer (default: 1e-3)
   --batch-size SIZE        Batch size for training (default: 16)
   --device DEVICE          Device to use: auto/cpu/cuda (default: auto)
-  --seed SEED              Random seed for reproducibility (default: 42)
+  --seed SEED              Random seed for reproducibility (default: 872002)
 
 Examples:
   # Basic training with default parameters
@@ -370,7 +370,7 @@ Command-specific help:
     system_group.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=872002,
         help="Random seed for reproducibility"
     )
     system_group.add_argument(

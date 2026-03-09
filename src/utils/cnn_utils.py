@@ -21,7 +21,7 @@ from utils.utils import tokenize_fn
 
 logger = logging.getLogger(__name__)
 
-def set_seed(seed=42):
+def set_seed(seed=872002):
     """Set seeds for reproducibility"""
     random.seed(seed)
     np.random.seed(seed)
